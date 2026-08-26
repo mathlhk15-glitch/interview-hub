@@ -1,0 +1,1024 @@
+/**
+ * screens2.js (2/2)
+ */
+
+// ── STEP3 생활기록부 불러오기 ─────────────────────────────────────────
+registerRoute("record-import", () => {
+  const body = el(`<div class="stack">
+    <div class="notice">생활기록부 파일은 서버에 저장하지 않습니다. 브라우저 메모리 안에서만 처리됩니다.</div>
+    <label class="field file-drop" id="drop-zone">
+      <span>PDF 파일 선택 또는 이곳에 끌어다 놓기</span>
+      <input type="file" accept="application/pdf" id="pdf-input">
+    </label>
+    <div id="pdf-status" class="muted"></div>
+    <hr class="divider">
+    <p class="label">추출이 잘 안 되나요? 텍스트를 직접 붙여넣으세요 (NEIS 화면에서 복사)</p>
+    <p class="muted small" id="char-count"></p>
+    <textarea id="paste-text" rows="10" placeholder="여기에 생활기록부 텍스트를 붙여넣으세요"></textarea>
+    <label class="field"><span>영역을 하나로 통일해서 지정 (선택)</span>
+      <select id="force-section"><option value="">자동 추정</option>${window.APP_DATA.recordSections.map((s) => `<option>${s}</option>`).join("")}</select>
+    </label>
+    <button class="btn-primary" id="use-paste-btn">붙여넣은 텍스트로 진행 (전체 사용)</button>
+    <button class="btn-ghost" onclick="navigate('no-record-input')">생활기록부 없이 진행할게요</button>
+  </div>`);
+
+  const input = body.querySelector("#pdf-input");
+  const status = body.querySelector("#pdf-status");
+  const pasteArea = body.querySelector("#paste-text");
+  const charCount = body.querySelector("#char-count");
+  const updateCharCount = () => { charCount.textContent = `현재 ${pasteArea.value.length.toLocaleString()}자 (전체를 그대로 사용합니다 — 앞부분만 잘라 쓰지 않습니다)`; };
+  pasteArea.addEventListener("input", updateCharCount);
+  updateCharCount();
+
+  input.addEventListener("change", async () => {
+    const file = input.files[0];
+    if (!file) return;
+    await handlePdfFile(file);
+  });
+
+  async function handlePdfFile(file) {
+    status.textContent = "추출 중…";
+    const result = await extractTextFromPdfFile(file);
+    if (!result.ok) {
+      status.innerHTML = `<span class="error-text">${escapeHtml(result.reason)}</span>`;
+      if (result.scanLike) pasteArea.placeholder = "이미지형/스캔 PDF로 보입니다. 여기에 직접 입력하거나 붙여넣으세요.";
+      return;
+    }
+    AppState.recordRawText = result.text;
+    status.innerHTML = `<span class="ok-text">텍스트 추출 완료 (${result.pages}페이지, ${result.text.length.toLocaleString()}자 — 전체를 사용합니다).</span>`;
+    pasteArea.value = result.text; // 절대 잘라서 넣지 않습니다
+    updateCharCount();
+  }
+
+  // 드래그 앤 드롭 실제 연결 (이전 버전은 문구만 있고 동작하지 않았습니다)
+  const dropZone = body.querySelector("#drop-zone");
+  ["dragenter", "dragover"].forEach((evt) => dropZone.addEventListener(evt, (e) => {
+    e.preventDefault(); e.stopPropagation(); dropZone.classList.add("dragover");
+  }));
+  ["dragleave", "drop"].forEach((evt) => dropZone.addEventListener(evt, (e) => {
+    e.preventDefault(); e.stopPropagation(); dropZone.classList.remove("dragover");
+  }));
+  dropZone.addEventListener("drop", async (e) => {
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    if (file.type !== "application/pdf") { status.innerHTML = `<span class="error-text">PDF 파일만 지원합니다.</span>`; return; }
+    await handlePdfFile(file);
+  });
+
+  body.querySelector("#use-paste-btn").onclick = () => {
+    const text = pasteArea.value.trim(); // 전체 값 사용 — 4000자 등으로 자르지 않음
+    if (!text) { toast("텍스트를 입력하거나 붙여넣어 주세요."); return; }
+    if (!AppState.recordRawText) AppState.recordRawText = text;
+    const forced = body.querySelector("#force-section").value || null;
+    const drafts = draftRecordsFromText(text, forced);
+    AppState.records.push(...drafts);
+    toast(`${drafts.length}개 항목을 초안으로 만들었습니다. 확인·수정하세요.`);
+    navigate("record-map");
+  };
+  body.appendChild(buildFlowNav("record"));
+  return screenShell("생활기록부 불러오기", "선택 기능입니다. 텍스트형 PDF만 자동 추출됩니다. 원문은 절대 일부만 잘라 쓰지 않습니다.", body);
+});
+
+// ── 추출 내용 확인·수정 + 다중 태그 지정 (§11, 보완: 복수 선택 허용) ──
+registerRoute("record-map", () => {
+  const body = el(`<div class="stack">
+    <div class="notice small">아래 태그는 규칙 기반 추천입니다. 한 기록에 여러 태그를 동시에 체크할 수 있습니다(예: 진로+학업). 반드시 직접 확인하세요.</div>
+    <div id="rec-list" class="stack"></div>
+    <div class="row-gap">
+      <button class="btn-ghost small" id="purge-buf-btn">PDF 원문 버퍼만 삭제</button>
+      <button class="btn-ghost small danger" id="purge-all-btn">학생부 관련 항목 전체 삭제</button>
+    </div>
+    <p class="muted small">"버퍼만 삭제"는 원본 텍스트만 지우고 이미 정리한 기록은 남깁니다. "전체 삭제"는 학생부에서 만든 기록·활동·질문까지 모두 지웁니다(직접 입력한 항목은 유지).</p>
+  </div>`);
+  const list = body.querySelector("#rec-list");
+  renderRecordList(list);
+  body.querySelector("#purge-buf-btn").onclick = () => purgeRecordRawText();
+  body.querySelector("#purge-all-btn").onclick = () => {
+    if (confirm("학생부에서 가져온 원문·기록·관련 활동·질문을 모두 삭제합니다. 계속할까요?")) {
+      purgeAllRecordData();
+      renderRecordList(list);
+    }
+  };
+  body.appendChild(buildFlowNav("record"));
+  return screenShell("학생부 면접 근거 지도", "기록을 ◎진로·전공 / ■학업·탐구 / ▲공동체 / ✕설명필요 로 표시합니다(복수 선택 가능).", body);
+});
+
+function autoTagsFromText(text) {
+  const hits = [];
+  window.APP_DATA.recordTags.forEach((tagDef) => {
+    if (tagDef.keywords.some((k) => text.includes(k))) hits.push(tagDef.id);
+  });
+  return hits;
+}
+
+function renderRecordList(list) {
+  list.innerHTML = "";
+  if (!AppState.records.length) { list.appendChild(el(`<p class="muted">아직 기록이 없습니다. 이전 화면에서 추가하세요.</p>`)); return; }
+  AppState.records.forEach((r) => {
+    if (!r.tagsInitialized) { r.tags = autoTagsFromText(r.text); r.tagsInitialized = true; }
+    const card = el(`<div class="card">
+      <div class="tag-checks"></div>
+      <select class="section-select">
+        <option value="">영역 미지정</option>
+        ${window.APP_DATA.recordSections.map((s) => `<option ${r.section===s?"selected":""}>${s}</option>`).join("")}
+      </select>
+      <textarea class="rec-text" rows="2">${escapeHtml(r.text)}</textarea>
+      <button class="btn-ghost small danger">삭제</button>
+    </div>`);
+    const tagBox = card.querySelector(".tag-checks");
+    window.APP_DATA.recordTags.forEach((t) => {
+      const label = el(`<label><input type="checkbox" ${recordHasTag(r, t.id) ? "checked" : ""}> ${t.mark} ${escapeHtml(t.label)}</label>`);
+      label.querySelector("input").onchange = (e) => toggleRecordTag(r, t.id, e.target.checked);
+      tagBox.appendChild(label);
+    });
+    card.querySelector(".section-select").onchange = (e) => {
+      r.section = e.target.value || "미지정";
+      AppState.questions.filter((q) => q.recordId === r.id).forEach((q) => { q.evidenceSection = r.section; });
+    };
+    card.querySelector(".rec-text").oninput = (e) => {
+      r.text = e.target.value;
+      AppState.questions.filter((q) => q.recordId === r.id).forEach((q) => { q.evidenceText = r.text; q.evidenceSection = r.section; });
+    };
+    card.querySelector(".danger").onclick = () => {
+      const qCount = AppState.questions.filter((q) => q.recordId === r.id).length;
+      const aCount = AppState.activities.filter((a) => a.recordId === r.id).length;
+      const msg = qCount || aCount ? `이 기록에서 만든 질문 ${qCount}개·핵심활동 ${aCount}개도 함께 삭제합니다. 계속할까요?` : "이 기록을 삭제할까요?";
+      if (!confirm(msg)) return;
+      AppState.records = AppState.records.filter((x) => x.id !== r.id);
+      AppState.questions = AppState.questions.filter((q) => q.recordId !== r.id);
+      AppState.activities = AppState.activities.filter((a) => a.recordId !== r.id);
+      renderRecordList(list);
+    };
+    list.appendChild(card);
+  });
+}
+
+// ── STEP7 핵심활동 TOP3 (§16, 보완: "내가 직접 한 일" 필드 추가) ───────
+registerRoute("activities", () => {
+  const body = el(`<div class="stack">
+    <div class="notice small">최대 3개까지 고르세요. 후보는 추천만 하고, 최종 선택은 학생이 합니다.</div>
+    <div id="candidate-list" class="stack"></div>
+    <hr class="divider">
+    <p class="label">선택된 핵심활동 (최대 3)</p>
+    <div id="chosen-list" class="stack"></div>
+  </div>`);
+  const candBox = body.querySelector("#candidate-list");
+  const chosenBox = body.querySelector("#chosen-list");
+  const candidates = AppState.records.filter((r) => ["career", "academic", "community"].some((t) => recordHasTag(r, t)));
+  if (!candidates.length) candBox.appendChild(el(`<p class="muted">추천 후보가 없습니다. 학생부 근거 지도에서 태그를 지정하세요.</p>`));
+  candidates.forEach((r) => {
+    const already = AppState.activities.some((a) => a.recordId === r.id);
+    const btn = el(`<button class="candidate-card" ${already ? "disabled" : ""}>
+      <span>${escapeHtml(r.text.slice(0, 60))}</span><span class="add-mark">${already ? "선택됨" : "+ 선택"}</span>
+    </button>`);
+    btn.onclick = () => {
+      if (AppState.activities.length >= 3) { toast("핵심활동은 최대 3개입니다."); return; }
+      AppState.activities.push({
+        id: uid("act"), recordId: r.id, name: r.text.slice(0, 20), situation: "", role: "",
+        action: "", process: "", result: "", limit: "", link: "", summary: "",
+      });
+      renderRoute();
+    };
+    candBox.appendChild(btn);
+  });
+  AppState.activities.forEach((a, idx) => {
+    const card = el(`<div class="card activity-card">
+      <div class="row-between"><strong>카드 ${idx + 1} · ${escapeHtml(a.name)}</strong><button class="btn-ghost small danger">삭제</button></div>
+      <label class="field"><span>상황(언제·어디서)</span><input class="a-situation" value="${escapeHtml(a.situation)}"></label>
+      <label class="field"><span>맡은 역할</span><input class="a-role" value="${escapeHtml(a.role)}"></label>
+      <label class="field"><span>내가 직접 한 일 (가장 중요 — 가장 길게)</span><textarea class="a-action" rows="4" placeholder="구체적인 행동을 동사로 적으세요">${escapeHtml(a.action)}</textarea></label>
+      <label class="field"><span>막힌 지점·해결 과정</span><textarea class="a-process" rows="2">${escapeHtml(a.process)}</textarea></label>
+      <label class="field"><span>결과·달라진 점</span><input class="a-result" value="${escapeHtml(a.result)}"></label>
+      <label class="field"><span>한계 / 다시 한다면</span><input class="a-limit" value="${escapeHtml(a.limit)}"></label>
+      <label class="field"><span>전공과의 연결</span><input class="a-link" value="${escapeHtml(a.link)}"></label>
+    </div>`);
+    const bind = (sel, key) => card.querySelector(sel).addEventListener("input", (e) => {
+      a[key] = e.target.value;
+      a.summary = (a.action || a.process || a.result || "").slice(0, 40);
+    });
+    bind(".a-situation", "situation"); bind(".a-role", "role"); bind(".a-action", "action");
+    bind(".a-process", "process"); bind(".a-result", "result"); bind(".a-limit", "limit"); bind(".a-link", "link");
+    card.querySelector(".danger").onclick = () => { AppState.activities = AppState.activities.filter((x) => x.id !== a.id); renderRoute(); };
+    chosenBox.appendChild(card);
+  });
+  body.appendChild(buildFlowNav("activities"));
+  return screenShell("핵심 활동 TOP 3", "빈칸으로 남은 자리가 곧 면접에서 질문이 들어올 자리입니다. '내가 직접 한 일'을 가장 자세히 쓰세요.", body);
+});
+
+// ── STEP5/6 질문 생성 + 우선순위 (§13,§17, 보완: 실제 태그 반영) ──────
+registerRoute("questions", () => {
+  const body = el(`<div class="stack">
+    <div class="notice small">질문 문장은 학생부에 없는 사실을 전제로 넣지 않습니다. 근거는 각 질문 아래에 함께 표시됩니다.</div>
+    <div id="q-source-list" class="stack"></div>
+  </div>`);
+  const box = body.querySelector("#q-source-list");
+  const sourceRecords = AppState.records.filter((r) => r.text);
+  if (!sourceRecords.length) box.appendChild(el(`<p class="muted">기록이 없습니다. 활동 카드를 먼저 채우거나 학생부 근거를 등록하세요.</p>`));
+  sourceRecords.forEach((r) => {
+    const header = el(`<div class="card">
+      <p class="record-evidence">근거: "${escapeHtml(r.text.slice(0, 80))}" <span class="muted">(${escapeHtml(r.section)})</span></p>
+      <button class="btn-secondary small gen-btn">${AppState.questions.some((q) => q.recordId === r.id) ? "질문 다시 보기" : "6방향 질문 만들기"}</button>
+      <div class="q-cards stack"></div>
+    </div>`);
+    const qCardsBox = header.querySelector(".q-cards");
+    function renderQCards() {
+      qCardsBox.innerHTML = "";
+      AppState.questions.filter((q) => q.recordId === r.id).forEach((q) => qCardsBox.appendChild(buildQuestionCard(q)));
+    }
+    header.querySelector(".gen-btn").onclick = () => {
+      if (!AppState.questions.some((q) => q.recordId === r.id)) {
+        AppState.questions.push(...generateSixDirectionQuestions(r));
+      }
+      renderQCards();
+    };
+    renderQCards();
+    box.appendChild(header);
+  });
+  if (AppState.questions.length) {
+    box.appendChild(el(`<div class="notice">잊지 마세요: 이 준비 데이터는 자동 저장되지 않습니다. <button class="btn-ghost small" onclick="navigate('data-io')" style="display:inline;width:auto">지금 백업하기</button></div>`));
+  }
+  body.appendChild(buildFlowNav("questions"));
+  return screenShell("기록 하나에서 6방향 질문", "동기·과정·개념·역할·한계·연결.", body);
+});
+
+function buildQuestionCard(q) {
+  const uni = getActiveUniversity();
+  const record = AppState.records.find((r) => r.id === q.recordId) || null;
+  const reason = estimatePriorityReason(record, uni?.evalWeights ? [uni.evalWeights] : []);
+  const card = el(`<div class="card q-card">
+    <div class="row-between"><strong>${escapeHtml(q.directionLabel)}</strong><span class="badge source-${q.source==='AI 제안'?'ai':'rule'}">${escapeHtml(q.source)}</span></div>
+    <p>${escapeHtml(q.text)}</p>
+    <p class="muted small">${escapeHtml(q.hint || "")}</p>
+    <label class="field"><span>우선순위</span>
+      <select class="pri-select">
+        <option value="" ${!q.priority?"selected":""}>미지정</option>
+        <option value="A" ${q.priority==='A'?"selected":""}>A · 반드시 준비</option>
+        <option value="B" ${q.priority==='B'?"selected":""}>B · 준비 권장</option>
+        <option value="C" ${q.priority==='C'?"selected":""}>C · 여유가 있으면</option>
+      </select>
+    </label>
+    <p class="muted small">참고: ${escapeHtml(reason)}</p>
+    <button class="btn-ghost small">꼬리질문 3층 열기</button>
+  </div>`);
+  card.querySelector(".pri-select").onchange = (e) => { q.priority = e.target.value || null; };
+  card.querySelector(".btn-ghost").onclick = () => navigate("followups", { qid: q.id });
+  return card;
+}
+
+// ── STEP6 꼬리질문 3층 (§15) ──────────────────────────────────────────
+registerRoute("followups", (params) => {
+  const q = AppState.questions.find((x) => x.id === params.qid) || AppState.questions[0];
+  if (!q) {
+    const body = el(`<p class="muted">질문을 먼저 만들어주세요.</p>`);
+    body.appendChild ? null : null;
+    const wrap = el(`<div class="stack"></div>`); wrap.appendChild(body);
+    wrap.appendChild(el(`<button class="btn-ghost" onclick="navigate('questions')">질문 목록으로</button>`));
+    return screenShell("꼬리질문 3층", "", wrap);
+  }
+  const body = el(`<div class="stack">
+    <div class="card"><p>${escapeHtml(q.text)}</p><p class="muted small">근거: ${escapeHtml(q.evidenceText || "")}</p></div>
+    <div id="layers" class="stack"></div>
+    <button class="btn-ghost" onclick="navigate('questions')">← 질문 목록으로 돌아가기</button>
+  </div>`);
+  const layers = body.querySelector("#layers");
+  (q.followUps || (q.followUps = buildFollowUpChecklist())).forEach((layer) => {
+    const row = el(`<div class="card layer-row">
+      <label class="field checkbox"><input type="checkbox" ${layer.done?"checked":""}> ${escapeHtml(layer.label)}</label>
+      <p class="muted small">${escapeHtml(layer.prompt)}</p>
+      <textarea rows="2" placeholder="키워드로 메모">${escapeHtml(layer.note || "")}</textarea>
+    </div>`);
+    row.querySelector("input").onchange = (e) => { layer.done = e.target.checked; };
+    row.querySelector("textarea").oninput = (e) => { layer.note = e.target.value; };
+    layers.appendChild(row);
+  });
+  return screenShell("꼬리질문 3층", "사실 → 과정·판단 → 근거·한계", body);
+});
+
+// ── 설명이 필요한 기록 대응 4단계 ──────────────────────────────────────
+registerRoute("weakness", () => {
+  if (!AppState.weaknessEntries) AppState.weaknessEntries = [];
+  const body = el(`<div class="stack">
+    <p class="muted small">${escapeHtml(window.APP_DATA.weaknessFrame.desc)}</p>
+    <div id="weak-list" class="stack"></div>
+    <button class="btn-primary" id="add-weak-btn">+ 새 항목 추가</button>
+  </div>`);
+  const list = body.querySelector("#weak-list");
+  function render() {
+    list.innerHTML = "";
+    AppState.weaknessEntries.forEach((entry, idx) => {
+      const card = el(`<div class="card">
+        <div class="row-between">
+          <select class="w-cat">${window.APP_DATA.weaknessFrame.weaknessCategories.map((c) => `<option ${entry.category===c?"selected":""}>${c}</option>`).join("")}</select>
+          <button class="btn-ghost small danger">삭제</button>
+        </div>
+        ${window.APP_DATA.weaknessFrame.steps.map((s) => `
+          <label class="field"><span>${escapeHtml(s.label)}</span>
+          <textarea rows="2" data-key="${s.key}" placeholder="${escapeHtml(s.hint)}">${escapeHtml(entry[s.key] || "")}</textarea></label>
+        `).join("")}
+      </div>`);
+      card.querySelector(".w-cat").onchange = (e) => { entry.category = e.target.value; };
+      card.querySelectorAll("textarea").forEach((t) => t.oninput = (e) => {
+        entry[e.target.dataset.key] = e.target.value;
+        AppState.weaknessSummary = AppState.weaknessEntries.map((w) => `${w.category}: ${w.accept||""}`).join(" / ");
+      });
+      card.querySelector(".danger").onclick = () => { AppState.weaknessEntries.splice(idx, 1); render(); };
+      list.appendChild(card);
+    });
+  }
+  body.querySelector("#add-weak-btn").onclick = () => {
+    AppState.weaknessEntries.push({ category: window.APP_DATA.weaknessFrame.weaknessCategories[0], accept: "", cause: "", effort: "", result: "" });
+    render();
+  };
+  render();
+  body.appendChild(buildFlowNav("weakness"));
+  return screenShell("설명이 필요한 기록 대응", "인정 → 원인 분석 → 바꾼 노력 → 현재 결과·변화", body);
+});
+
+// ── STEP8 지원동기·학과 이해 ──────────────────────────────────────────
+registerRoute("motivation", () => {
+  const s = AppState;
+  const body = el(`<div class="stack">
+    <label class="field"><span>계기가 된 순간(하나만)</span><textarea id="m1" rows="2">${escapeHtml(s.motiveMoment||"")}</textarea></label>
+    <label class="field"><span>그래서 실제로 한 일 (최대 3개, 줄바꿈으로 구분)</span><textarea id="m2" rows="3">${escapeHtml((s.motiveActions||[]).join("\n"))}</textarea></label>
+    <label class="field"><span>학과에서 배우는 것 (대학 공식 페이지에서 확인한 과목/주제 1~3개)</span><textarea id="m3" rows="2">${escapeHtml(s.majorCourses||"")}</textarea></label>
+    <label class="field"><span>확인 출처·확인일</span><input id="m3s" placeholder="예: OO대 학과 홈페이지 교육과정, 2026-03-01" value="${escapeHtml(s.majorSourceLog||"")}"></label>
+    <label class="field"><span>가장 배우고 싶은 과목과 이유</span><textarea id="m4" rows="2">${escapeHtml(s.favoriteCourseWhy||"")}</textarea></label>
+    <label class="field"><span>입학 후 하고 싶은 것</span><textarea id="m5" rows="2">${escapeHtml(s.afterAdmission||"")}</textarea></label>
+    <label class="field"><span>지원동기 한 줄 (인쇄용, 80자 이내)</span><input id="m6" maxlength="80" value="${escapeHtml(s.motiveOneLine||"")}"></label>
+    <div class="notice small">학과 교육과정 등 최신 정보를 이 앱이 임의로 만들지 않습니다. 반드시 대학 홈페이지에서 확인 후 입력하세요.</div>
+    <button class="btn-primary" id="save-m-btn">저장</button>
+  </div>`);
+  body.querySelector("#save-m-btn").onclick = () => {
+    s.motiveMoment = body.querySelector("#m1").value;
+    s.motiveActions = body.querySelector("#m2").value.split("\n").filter(Boolean);
+    s.majorCourses = body.querySelector("#m3").value;
+    s.majorSourceLog = body.querySelector("#m3s").value;
+    s.favoriteCourseWhy = body.querySelector("#m4").value;
+    s.afterAdmission = body.querySelector("#m5").value;
+    s.motiveOneLine = body.querySelector("#m6").value;
+    toast("저장했습니다.");
+  };
+  body.appendChild(buildFlowNav("motivation"));
+  return screenShell("지원동기·학과 이해", "계기 → 한 일 → 학과 이해 → 하고 싶은 것.", body);
+});
+
+// ── AI 면접 코치 (§18~26, 보완: 단일기록 실선택 + feedback도 동일 안전절차 + 전체 필드 노출) ──
+registerRoute("ai-coach", () => {
+  const body = el(`<div class="stack">
+    <div class="notice">AI API를 쓰지 않습니다. 프롬프트를 만들어 복사한 뒤, 평소 쓰는 AI에 붙여넣고 결과를 다시 이 화면에 붙여넣습니다.</div>
+    <div class="menu-grid three">
+      <button class="menu-card small" data-mode="full"><span class="menu-title">① 전체 분석</span></button>
+      <button class="menu-card small" data-mode="single"><span class="menu-title">② 선택 기록 집중분석</span></button>
+      <button class="menu-card small" data-mode="feedback"><span class="menu-title">③ 내 답변 피드백</span></button>
+    </div>
+    <div id="ai-wizard"></div>
+  </div>`);
+  body.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => renderAiWizard(body.querySelector("#ai-wizard"), b.dataset.mode));
+  body.appendChild(buildFlowNav("ai-coach"));
+  return screenShell("AI 면접 코치 활용하기", "학생 답을 AI가 대신 만드는 것이 아니라, AI가 더 좋은 질문을 던지게 합니다.", body);
+});
+
+function renderAiWizard(mount, mode) {
+  mount.innerHTML = "";
+  const state = { step: 1, selectedSectionKeys: {}, selectedRecordId: null, redactedText: "", answerDraft: "" };
+  const wizard = el(`<div class="card wizard"></div>`);
+  mount.appendChild(wizard);
+
+  function renderStep() {
+    wizard.innerHTML = "";
+    if (state.step === 1) renderSelectStep();
+    else if (state.step === 2) renderRedactStep();
+    else if (state.step === 3) renderPreviewStep();
+    else if (state.step === 4) renderGenerateStep();
+  }
+
+  function bySectionMap() {
+    const bySection = {};
+    AppState.records.forEach((r) => { (bySection[r.section] = bySection[r.section] || []).push(r); });
+    return bySection;
+  }
+
+  function renderSelectStep() {
+    if (mode === "feedback") {
+      wizard.appendChild(el(`<h3>단계 1 · 점검받을 답변 입력</h3>`));
+      const ta = el(`<textarea rows="6" placeholder="점검받고 싶은 답변을 입력하세요">${escapeHtml(state.answerDraft)}</textarea>`);
+      wizard.appendChild(ta);
+      const next = el(`<button class="btn-primary">다음</button>`);
+      next.onclick = () => { state.answerDraft = ta.value; state.step = 2; renderStep(); };
+      wizard.appendChild(next);
+      return;
+    }
+    if (mode === "single") {
+      wizard.appendChild(el(`<h3>단계 1 · 집중분석할 기록 정확히 1개 선택</h3>`));
+      if (!AppState.records.length) wizard.appendChild(el(`<p class="muted">선택할 기록이 없습니다. 활동을 먼저 등록하세요.</p>`));
+      const listBox = el(`<div class="stack"></div>`);
+      AppState.records.forEach((r) => {
+        const row = el(`<label class="field checkbox">
+          <input type="radio" name="single-record" value="${r.id}" ${state.selectedRecordId===r.id?"checked":""}>
+          <span>[${escapeHtml(r.section)}] ${escapeHtml(r.text.slice(0, 70))}</span>
+        </label>`);
+        row.querySelector("input").onchange = () => { state.selectedRecordId = r.id; };
+        listBox.appendChild(row);
+      });
+      wizard.appendChild(listBox);
+      const next = el(`<button class="btn-primary">다음</button>`);
+      next.onclick = () => {
+        if (!state.selectedRecordId) { toast("기록을 하나 선택하세요."); return; }
+        state.step = 2; renderStep();
+      };
+      wizard.appendChild(next);
+      return;
+    }
+    // mode === "full"
+    wizard.appendChild(el(`<h3>단계 1 · AI에 보낼 내용 선택</h3>`));
+    const bySection = bySectionMap();
+    Object.keys(bySection).forEach((section) => {
+      const checked = !SENSITIVE_BY_DEFAULT_OFF.includes(section);
+      const row = el(`<label class="field checkbox"><input type="checkbox" data-section="${escapeHtml(section)}" ${checked?"checked":""}> ${escapeHtml(section)} (${bySection[section].length}건)${SENSITIVE_BY_DEFAULT_OFF.includes(section)?' <span class="muted small">— 민감도가 높아 기본 해제</span>':''}</label>`);
+      wizard.appendChild(row);
+    });
+    if (!Object.keys(bySection).length) wizard.appendChild(el(`<p class="muted">선택할 기록이 없습니다. 활동을 먼저 등록하세요.</p>`));
+    const next = el(`<button class="btn-primary">다음</button>`);
+    next.onclick = () => {
+      state.selectedSectionKeys = {};
+      wizard.querySelectorAll("[data-section]").forEach((cb) => { state.selectedSectionKeys[cb.dataset.section] = cb.checked; });
+      state.step = 2; renderStep();
+    };
+    wizard.appendChild(next);
+  }
+
+  function collectSelectedText() {
+    if (mode === "feedback") return state.answerDraft;
+    if (mode === "single") {
+      const r = AppState.records.find((x) => x.id === state.selectedRecordId);
+      return r ? `[${r.section}]\n- ${r.text}` : "";
+    }
+    const bySection = bySectionMap();
+    let text = "";
+    Object.keys(state.selectedSectionKeys).forEach((section) => {
+      if (state.selectedSectionKeys[section]) {
+        text += `[${section}]\n` + bySection[section].map((r) => "- " + r.text).join("\n") + "\n\n";
+      }
+    });
+    return text.trim();
+  }
+
+  function renderRedactStep() {
+    wizard.appendChild(el(`<h3>단계 2 · 개인정보 제거</h3>`));
+    const raw = collectSelectedText();
+    const hits = findPiiCandidates(raw);
+    wizard.appendChild(el(`<p class="muted small">제거 후보 목록: ${window.APP_DATA.piiRedactionHints.join(", ")}</p>`));
+    if (hits.length) wizard.appendChild(el(`<div class="notice small">자동 탐지된 후보: ${hits.map(escapeHtml).join(" / ")}</div>`));
+    const ta = el(`<textarea id="redact-ta" rows="8">${escapeHtml(raw)}</textarea>`);
+    wizard.appendChild(el(`<p class="label">아래에서 이름·학교명 등을 직접 지우거나 [ ]로 바꾸세요</p>`));
+    wizard.appendChild(ta);
+    const next = el(`<button class="btn-primary">다음 · 전송 내용 미리보기</button>`);
+    next.onclick = () => { state.redactedText = ta.value; state.step = 3; renderStep(); };
+    wizard.appendChild(next);
+  }
+
+  function renderPreviewStep() {
+    wizard.appendChild(el(`<h3>단계 3 · 전송 내용 미리보기</h3>`));
+    wizard.appendChild(el(`<div class="notice">AI 프롬프트를 외부 AI 서비스에 붙여넣으면 선택한 내용이 해당 서비스로 전송됩니다. 보내기 전 개인정보와 전송 범위를 반드시 확인하세요.</div>`));
+    wizard.appendChild(el(`<pre class="preview-box">${escapeHtml(state.redactedText || "(내용 없음)")}</pre>`));
+    const confirmLabel = el(`<label class="field checkbox"><input type="checkbox" id="confirm-cb"> 확인했습니다</label>`);
+    wizard.appendChild(confirmLabel);
+    const next = el(`<button class="btn-primary" disabled>다음 · 프롬프트 생성</button>`);
+    confirmLabel.querySelector("input").onchange = (e) => { next.disabled = !e.target.checked; };
+    next.onclick = () => { state.step = 4; renderStep(); };
+    wizard.appendChild(next);
+  }
+
+  function renderGenerateStep() {
+    wizard.appendChild(el(`<h3>단계 4-5 · 프롬프트 생성 및 복사</h3>`));
+    const uni = getActiveUniversity();
+    const prompt = buildAiPrompt({ university: uni, mode, redactedPreviewText: state.redactedText });
+    const ta = el(`<textarea rows="12" readonly>${escapeHtml(prompt)}</textarea>`);
+    wizard.appendChild(ta);
+    const copyBtn = el(`<button class="btn-primary">프롬프트 복사하기</button>`);
+    copyBtn.onclick = async () => {
+      try { await navigator.clipboard.writeText(prompt); toast("복사했습니다. 사용하는 AI에 붙여넣으세요."); }
+      catch (e) { ta.select(); toast("자동 복사에 실패했습니다. 직접 선택해 복사해주세요."); }
+    };
+    wizard.appendChild(copyBtn);
+    wizard.appendChild(el(`<ol class="usage-steps">
+      <li>프롬프트를 복사합니다.</li>
+      <li>평소 사용하는 ChatGPT, Claude, Gemini 등 AI를 엽니다.</li>
+      <li>복사한 프롬프트를 붙여넣습니다.</li>
+      <li>AI가 분석한 결과를 전체 복사합니다.</li>
+      <li>아래 [AI 분석 결과 가져오기]에 붙여넣습니다.</li>
+    </ol>`));
+    const resultTa = el(`<textarea id="ai-result-ta" rows="8" placeholder="AI 분석 결과 붙여넣기"></textarea>`);
+    wizard.appendChild(resultTa);
+    const importBtn = el(`<button class="btn-secondary">AI 분석 결과 가져오기</button>`);
+    const resultBox = el(`<div id="ai-result-box" class="stack"></div>`);
+    importBtn.onclick = () => {
+      AppState.aiResultRaw = resultTa.value;
+      resultBox.innerHTML = "";
+      if (mode === "feedback") {
+        const feedback = tryParseFeedbackJson(resultTa.value);
+        if (feedback.ok) {
+          renderAiFeedbackResult(resultBox, feedback.data);
+          toast("답변 피드백 형식으로 정상 인식했습니다.");
+        } else {
+          resultBox.appendChild(el(`<div class="notice small">피드백 JSON을 인식하지 못했습니다. AI 결과를 참고해 직접 읽어주세요. 잘한 점·보완점은 질문은행에 자동 저장하지 않습니다.</div>`));
+          resultBox.appendChild(el(`<pre class="preview-box">${escapeHtml(resultTa.value)}</pre>`));
+        }
+        return;
+      }
+      const parsed = tryParseAiJson(resultTa.value);
+      let sections;
+      if (parsed.ok) {
+        toast("JSON 형식으로 정상 인식했습니다. 모든 항목을 아래에 보여줍니다.");
+        sections = buildAiSections(parsed.data);
+        if (!sections.length) resultBox.appendChild(el(`<p class="muted">JSON은 인식했지만 채울 항목이 없습니다.</p>`));
+      } else {
+        resultBox.appendChild(el(`<div class="notice small">자동으로 결과를 구분하지 못했습니다. 아래 카드를 직접 편집한 뒤에만 채택할 수 있습니다.</div>`));
+        sections = [buildFallbackSection(resultTa.value)];
+      }
+      sections.forEach((sec) => {
+        resultBox.appendChild(el(`<p class="label">${escapeHtml(sec.label)}</p>`));
+        sec.cards.forEach((c) => resultBox.appendChild(buildAiResultCard(c, sec.key, sec.requireEditBeforeAdopt, sec.requireFactVerification)));
+      });
+    };
+    wizard.appendChild(importBtn);
+    wizard.appendChild(resultBox);
+    wizard.appendChild(el(`<div class="notice small">AI 분석 결과는 참고자료입니다. 학생부 원문과 대학 모집요강을 기준으로 직접 확인하세요.</div>`));
+  }
+
+  renderStep();
+}
+
+function renderAiFeedbackResult(box, data) {
+  box.appendChild(el(`<div class="card"><p class="label">잘한 점 1개</p><p>${escapeHtml(data.goodPoint || "(없음)")}</p></div>`));
+  box.appendChild(el(`<div class="card"><p class="label">보완할 점 최대 2개</p><ul>${(data.improvements || []).map((x) => `<li>${escapeHtml(x)}</li>`).join("") || "<li>(없음)</li>"}</ul></div>`));
+  const follow = el(`<div class="card"><p class="label">예상 꼬리질문</p><div class="stack"></div></div>`);
+  const inner = follow.querySelector(".stack");
+  (data.followUpQuestions || []).forEach((q) => {
+    const row = el(`<div class="row-between"><span>${escapeHtml(q)}</span><button class="btn-ghost small">질문은행에 추가</button></div>`);
+    row.querySelector("button").onclick = () => { pushAiQuestion(q, null); row.querySelector("button").disabled = true; toast("꼬리질문을 질문은행에 추가했습니다."); };
+    inner.appendChild(row);
+  });
+  if (!(data.followUpQuestions || []).length) inner.appendChild(el(`<p class="muted">꼬리질문이 없습니다.</p>`));
+  box.appendChild(follow);
+  box.appendChild(el(`<div class="notice small">잘한 점과 보완점은 피드백으로만 보여주며 질문은행에 자동 저장하지 않습니다.</div>`));
+}
+
+function buildAiResultCard(c, sectionKey, requireEditBeforeAdopt, requireFactVerification) {
+  const card = el(`<div class="card ai-card">
+    <div class="row-between"><span class="badge source-ai">AI 제안</span>
+      <select class="status-select">
+        <option ${c.status==='미검토'?'selected':''}>미검토</option>
+        <option value="채택" ${c.status==='채택'?'selected':''} ${(requireEditBeforeAdopt && !c.edited) || (requireFactVerification && !c.factVerified) ? "disabled" : ""}>채택</option>
+        <option ${c.status==='삭제'?'selected':''}>삭제</option>
+      </select>
+    </div>
+    <textarea rows="2" class="ai-text">${escapeHtml(c.text)}</textarea>
+    ${requireEditBeforeAdopt ? `<p class="muted small edit-hint">${c.edited ? "편집 완료 — 이제 채택할 수 있습니다." : "먼저 내용을 확인·수정해야 채택할 수 있습니다."}</p>` : ""}
+    ${requireFactVerification ? `<label class="field checkbox fact-confirm"><input type="checkbox" ${c.factVerified ? "checked" : ""}> 학생부 원문 또는 내 실제 경험에서 사실임을 확인했습니다</label>` : ""}
+  </div>`);
+  const statusSelect = card.querySelector(".status-select");
+  const textArea = card.querySelector(".ai-text");
+  const refreshAdoptEnabled = () => {
+    const opt = statusSelect.querySelector('option[value="채택"]');
+    if (opt) opt.disabled = (requireEditBeforeAdopt && !c.edited) || (requireFactVerification && !c.factVerified);
+  };
+  const factCb = card.querySelector(".fact-confirm input");
+  if (factCb) factCb.onchange = (e) => { c.factVerified = e.target.checked; refreshAdoptEnabled(); };
+  textArea.oninput = (e) => {
+    c.text = e.target.value;
+    if (requireEditBeforeAdopt && !c.edited && c.text !== c.originalText) {
+      c.edited = true;
+      refreshAdoptEnabled();
+      const hint = card.querySelector(".edit-hint");
+      if (hint) hint.textContent = "편집 완료 — 이제 채택할 수 있습니다.";
+    }
+  };
+  statusSelect.onchange = (e) => {
+    c.status = e.target.value;
+    if (c.status === "채택") {
+      if ((requireEditBeforeAdopt && !c.edited) || (requireFactVerification && !c.factVerified)) { c.status = "미검토"; statusSelect.value = "미검토"; toast("채택 전 확인 조건을 완료하세요."); return; }
+      const handler = AI_ADOPT_HANDLERS[sectionKey] || AI_ADOPT_HANDLERS.default;
+      handler(c.text, c.priority);
+      toast("채택했습니다.");
+    }
+  };
+  return card;
+}
+
+function pushAiQuestion(text, priority) {
+  AppState.questions.push({
+    id: uid("q"), recordId: null, direction: "ai", directionLabel: "AI 제안", text, hint: "",
+    evidenceText: "", evidenceSection: "", source: "AI 제안", priority: priority || null,
+    followUps: window.APP_DATA.followUpLayers.map((l) => ({ ...l, done: false, note: "" })),
+  });
+}
+const AI_ADOPT_HANDLERS = {
+  coreRecords: (text) => { AppState.records.push({ id: uid("rec"), section: "AI 확인 기록", text, tags: autoTagsFromText(text), tagsInitialized: true, source: "AI 제안(학생 확인)" }); },
+  coreActivities: (text) => {
+    if (AppState.activities.length >= 3) { toast("핵심활동은 이미 3개입니다. 기존 활동을 정리한 뒤 다시 시도하세요."); return; }
+    AppState.activities.push({ id: uid("act"), recordId: null, name: text.slice(0, 20), situation: "", role: "", action: text, process: "", result: "", limit: "", link: "", summary: text.slice(0, 40) });
+  },
+  priorityA: (text) => pushAiQuestion(text, "A"),
+  priorityB: (text) => pushAiQuestion(text, "B"),
+  priorityC: (text) => pushAiQuestion(text, "C"),
+  needsExplanation: (text) => { AppState.weaknessEntries.push({ category: "기타", accept: text, cause: "", effort: "", result: "" }); },
+  followUpQuestions: (text) => pushAiQuestion(text, null),
+  needStudentVerification: (text) => { AppState.aiVerificationNotes.push(text); },
+  fallback: (text) => pushAiQuestion(text, null),
+  default: (text) => pushAiQuestion(text, null),
+};
+
+// ── STEP9 30초·60초 훈련 (STAR/OREO, iOS 대응 녹음, 정직한 반복 카운터) ─
+registerRoute("trainer", () => {
+  const pool = AppState.questions.length ? AppState.questions : [{ text: "질문을 먼저 만들어주세요.", directionLabel: "" }];
+  let current = pool[Math.floor(Math.random() * pool.length)];
+  let frame = "star";
+  const attemptsByQuestion = new Map();
+  const questionKey = () => current.id || current.text;
+  const currentAttemptCount = () => attemptsByQuestion.get(questionKey()) || 0;
+
+  const body = el(`<div class="stack">
+    <div class="card">
+      <p class="label">현재 질문</p>
+      <p id="cur-q">${escapeHtml(current.text)}</p>
+      <button class="btn-ghost small" id="random-btn">질문 랜덤 선택</button>
+    </div>
+    <label class="field"><span>프레임 선택</span>
+      <select id="frame-select">
+        <option value="star">${escapeHtml(window.APP_DATA.answerFrames.star.label)}</option>
+        <option value="oreo">${escapeHtml(window.APP_DATA.answerFrames.oreo.label)}</option>
+      </select>
+    </label>
+    <div id="frame-desc" class="notice small"></div>
+    <div id="frame-steps" class="stack"></div>
+    <div class="row-gap">
+      <label class="field"><span>준비시간(초)</span><input id="prep-sec" type="number" value="10" min="0"></label>
+    </div>
+    <div class="timer-box">
+      <div id="phase-label" class="phase-label">대기 중</div>
+      <div id="timer-display" class="timer-display">--</div>
+    </div>
+    <div class="row-gap">
+      <button class="btn-primary" id="start30">30초 훈련 시작</button>
+      <button class="btn-primary" id="start60">60초 훈련 시작</button>
+      <button class="btn-ghost" id="cancel-btn">중지</button>
+    </div>
+    <div id="rec-status" class="muted small"></div>
+    <audio id="playback" controls style="display:none;width:100%"></audio>
+    <p class="muted small" id="attempt-count">같은 질문 시도: 0회</p>
+    <div class="notice small">세 번 모두 정확히 같은 문장을 외우려 하지 마세요. 키워드는 같아도 문장은 매번 달라져도 됩니다(이 앱은 실제 발화를 텍스트로 옮기지 않으므로, 문장이 똑같은지는 자동으로 판정하지 않습니다).</div>
+  </div>`);
+
+  function renderFrame() {
+    const f = window.APP_DATA.answerFrames[frame];
+    body.querySelector("#frame-desc").textContent = f.desc;
+    const stepsBox = body.querySelector("#frame-steps");
+    stepsBox.innerHTML = "";
+    f.steps.forEach((s) => stepsBox.appendChild(el(`<div class="field"><span class="chip">${escapeHtml(s.label)}</span> <span class="muted small">${escapeHtml(s.hint)}</span></div>`)));
+  }
+  renderFrame();
+  body.querySelector("#frame-select").onchange = (e) => { frame = e.target.value; renderFrame(); };
+  body.querySelector("#random-btn").onclick = () => {
+    current = pool[Math.floor(Math.random() * pool.length)];
+    body.querySelector("#cur-q").textContent = current.text;
+    body.querySelector("#attempt-count").textContent = `같은 질문 시도: ${currentAttemptCount()}회`;
+  };
+
+  let trainer = null;
+  let trainingActive = false;
+  const setTrainingLocked = (locked) => {
+    trainingActive = locked;
+    body.querySelector("#start30").disabled = locked;
+    body.querySelector("#start60").disabled = locked;
+    body.querySelector("#random-btn").disabled = locked;
+    body.querySelector("#frame-select").disabled = locked;
+  };
+  // 중요: getUserMedia는 버튼 클릭 이벤트의 첫 비동기 동작으로 바로 호출합니다.
+  // 준비시간 타이머를 먼저 기다린 뒤에 마이크를 요청하면 iOS Safari 등에서
+  // "사용자 제스처 직후"라는 조건이 깨져 권한 요청이 막힐 수 있습니다.
+  async function runTraining(mainSeconds) {
+    if (trainingActive) return;
+    setTrainingLocked(true);
+    trainer = new SpeakingTrainer({
+      onTick: (remaining) => { body.querySelector("#timer-display").textContent = remaining + "s"; },
+      onPhaseChange: (phase, seconds) => { body.querySelector("#phase-label").textContent = phase; body.querySelector("#timer-display").textContent = seconds + "s"; },
+      onRecordingBlob: (blob) => {
+        const url = URL.createObjectURL(blob);
+        const audio = body.querySelector("#playback");
+        audio.src = url; audio.style.display = "block";
+      },
+      onFallback: (msg) => { body.querySelector("#rec-status").textContent = msg; },
+    });
+    const recorded = await trainer.acquireStream(); // ← 클릭 직후 즉시 호출 (제스처 보존)
+    if (trainer.cancelled) { trainer.releaseStream(); setTrainingLocked(false); return; }
+    body.querySelector("#rec-status").textContent = recorded ? "마이크 확보됨. 준비시간 뒤 녹음이 시작됩니다." : "스톱워치 모드로 진행합니다.";
+
+    try {
+      const prepSec = parseInt(body.querySelector("#prep-sec").value, 10) || 0;
+      if (prepSec > 0) {
+        const prepDone = await trainer.runPhase(prepSec, "준비 시간");
+        if (!prepDone) return;
+      }
+
+      let recordingStarted = false;
+      if (recorded) {
+        recordingStarted = trainer.beginRecording();
+        body.querySelector("#rec-status").textContent = recordingStarted
+          ? "녹음 중… (메모리에만 저장되며 새로고침 시 사라집니다)"
+          : "녹음 시작에 실패하여 스톱워치 모드로 진행합니다.";
+      }
+      const mainDone = await trainer.runPhase(mainSeconds, mainSeconds === 30 ? "30초 답변" : "60초 답변");
+      if (!mainDone) return;
+      trainer.stopRecording();
+      body.querySelector("#phase-label").textContent = "완료";
+      const key = questionKey();
+      const count = currentAttemptCount() + 1;
+      attemptsByQuestion.set(key, count);
+      body.querySelector("#attempt-count").textContent = `같은 질문 시도: ${count}회`;
+    } finally {
+      setTrainingLocked(false);
+    }
+  }
+  body.querySelector("#start30").onclick = () => runTraining(30);
+  body.querySelector("#start60").onclick = () => runTraining(60);
+  body.querySelector("#cancel-btn").onclick = () => { if (trainer) trainer.cancel(); body.querySelector("#phase-label").textContent = "중지됨"; setTrainingLocked(false); };
+
+  body.appendChild(buildFlowNav("trainer"));
+  return screenShell("30초·60초 말하기 훈련", "키워드는 같아도 문장은 매번 달라져도 됩니다.", body);
+});
+
+// ── STEP10 모의면접 자가평가 (§30, 보완: 실제 상태 저장) ───────────────
+registerRoute("mock-eval", () => {
+  if (!AppState.mockEvaluation) AppState.mockEvaluation = { checks: {}, good: "", fix: "" };
+  const me = AppState.mockEvaluation;
+  const body = el(`<div class="stack"></div>`);
+  Object.entries(window.APP_DATA.mockEvalItems).forEach(([cat, items]) => {
+    const card = el(`<div class="card"><h3>${escapeHtml(cat)}</h3></div>`);
+    items.forEach((it) => {
+      const key = cat + "::" + it;
+      const row = el(`<label class="field checkbox"><input type="checkbox" ${me.checks[key] ? "checked" : ""}> ${escapeHtml(it)}</label>`);
+      row.querySelector("input").onchange = (e) => { me.checks[key] = e.target.checked; };
+      card.appendChild(row);
+    });
+    body.appendChild(card);
+  });
+  const goodTa = el(`<label class="field"><span>잘한 점 1개</span><textarea rows="2">${escapeHtml(me.good)}</textarea></label>`);
+  goodTa.querySelector("textarea").oninput = (e) => { me.good = e.target.value; };
+  const fixTa = el(`<label class="field"><span>고칠 점 (최대 2개)</span><textarea rows="2">${escapeHtml(me.fix)}</textarea></label>`);
+  fixTa.querySelector("textarea").oninput = (e) => { me.fix = e.target.value; };
+  body.appendChild(goodTa); body.appendChild(fixTa);
+  body.appendChild(el(`<button class="btn-primary" onclick="navigate('print-sheet')">저장하고 인쇄용으로 이동</button>`));
+  body.appendChild(buildFlowNav("mock-eval"));
+  return screenShell("모의면접 자가평가", "체크와 메모는 자동으로 저장됩니다. 피드백은 잘한 점 1개 + 고칠 점 최대 2개까지만.", body);
+});
+
+// ── 블라인드 위험표현 점검 (§31) ──────────────────────────────────────
+registerRoute("blind-check", () => {
+  const body = el(`<div class="stack">
+    <div class="notice small">${escapeHtml(window.APP_DATA.blindRiskNote)}</div>
+    <textarea id="blind-input" rows="6" placeholder="점검할 답변을 붙여넣으세요"></textarea>
+    <button class="btn-primary" id="check-btn">위험 후보 점검</button>
+    <div id="blind-result" class="stack"></div>
+  </div>`);
+  body.querySelector("#check-btn").onclick = () => {
+    const text = body.querySelector("#blind-input").value;
+    const result = body.querySelector("#blind-result");
+    result.innerHTML = "";
+    const patterns = {
+      school: [/[가-힣A-Za-z0-9]+(?:고등학교|고교)/g, /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별자치도|특별자치시|광역시|도|시)?/g],
+      score: [/\d+(?:\.\d+)?\s*등급/g, /전교\s*\d+\s*등/g, /백분위\s*\d+/g, /모의고사\s*\d+/g],
+      award: [/[가-힣A-Za-z0-9]+(?:학원|대회|센터|기관)/g, /(?:대상|금상|은상|동상|최우수상|우수상)/g],
+      name: [/[가-힣]{2,4}\s*(?:선생님|교사|교수님|교수)/g],
+    };
+    window.APP_DATA.blindRiskCategories.forEach((cat) => {
+      const regs = patterns[cat.id] || [];
+      const hits = regs.flatMap((re) => Array.from(text.matchAll(new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g"))).map((m) => m[0]));
+      if (hits.length) {
+        const uniq = Array.from(new Set(hits)).slice(0, 5);
+        result.appendChild(el(`<div class="card">
+          <p><strong>블라인드 규정 확인 필요</strong> — ${escapeHtml(cat.label)}</p>
+          <p class="muted small">탐지 예: ${escapeHtml(uniq.join(" / "))}</p>
+          <label class="field checkbox"><input type="checkbox"> 대학별 블라인드 안내문에서 확인했다</label>
+        </div>`));
+      }
+    });
+    if (!result.children.length) result.appendChild(el(`<p class="muted">뚜렷한 위험 후보가 발견되지 않았습니다. (탐지되지 않았다고 안전이 보장되는 것은 아닙니다)</p>`));
+  };
+  body.appendChild(buildFlowNav("blind-check"));
+  return screenShell("블라인드 위험표현 점검", "'위반'이라 단정하지 않습니다. 확인이 필요한 후보만 보여줍니다.", body);
+});
+
+// ── 위기 대응 카드 (§32) ──────────────────────────────────────────────
+registerRoute("crisis-card", () => {
+  const body = el(`<div class="stack">${window.APP_DATA.crisisCards.map((c) => `
+    <div class="card"><p class="label">${escapeHtml(c.situation)}</p><p class="crisis-line">${escapeHtml(c.line)}</p></div>
+  `).join("")}</div>`);
+  return screenShell("위기 대응 카드", "언제든 열어보세요.", body);
+});
+
+// ── 빈출 12유형 (§33, 보완: 실제 상태 저장) ────────────────────────────
+registerRoute("common12", () => {
+  if (!AppState.commonAnswers) AppState.commonAnswers = {};
+  const body = el(`<div class="stack">${window.APP_DATA.common12.map((c) => `
+    <div class="card" data-id="${c.id}">
+      <p class="label">${escapeHtml(c.label)} ${c.optional ? '<span class="badge">선택</span>' : ""}</p>
+      ${c.note ? `<p class="muted small">${escapeHtml(c.note)}</p>` : ""}
+      <textarea rows="2" placeholder="키워드로 적기">${escapeHtml(AppState.commonAnswers[c.id] || "")}</textarea>
+    </div>`).join("")}
+    <button class="btn-ghost" onclick="navigate('student-dashboard')">학생 홈으로</button>
+  </div>`);
+  body.querySelectorAll(".card[data-id]").forEach((card) => {
+    const id = card.dataset.id;
+    card.querySelector("textarea").addEventListener("input", (e) => { AppState.commonAnswers[id] = e.target.value; });
+  });
+  return screenShell("빈출 공통질문 12유형", "문장이 아니라 키워드로 적습니다(자동 저장됩니다). 자기소개·마지막 할 말은 묻지 않는 대학도 많습니다.", body);
+});
+
+// ── 특수 면접 / 제시문 모드 (§34) ─────────────────────────────────────
+registerRoute("special-track", () => {
+  const uni = getActiveUniversity();
+  const trackId = uni?.specialTrack && uni.specialTrack !== "none" ? uni.specialTrack : null;
+  const body = el(`<div class="stack"></div>`);
+  const effectiveType = effectiveInterviewType(uni);
+  if (effectiveType === "제시문 기반") {
+    body.appendChild(el(`<div class="notice">${escapeHtml(window.APP_DATA.presentationModeNote)}</div>`));
+    body.appendChild(el(`<label class="field"><span>내가 찾은 기출 제시문 붙여넣기</span><textarea rows="6" id="prompt-paste"></textarea></label>`));
+    body.appendChild(el(`<label class="field"><span>준비시간(초)</span><input type="number" id="prep-timer-sec" value="600"></label>`));
+    const timerDisplay = el(`<div class="timer-display" id="prompt-timer">--</div>`);
+    body.appendChild(timerDisplay);
+    const startBtn = el(`<button class="btn-primary">준비시간 타이머 시작</button>`);
+    let iv = null;
+    startBtn.onclick = () => {
+      let remain = parseInt(body.querySelector("#prep-timer-sec").value, 10) || 0;
+      clearInterval(iv);
+      iv = setInterval(() => { remain--; timerDisplay.textContent = remain + "s"; if (remain <= 0) clearInterval(iv); }, 1000);
+    };
+    body.appendChild(startBtn);
+    body.appendChild(el(`<div class="card"><h3>제시문 메모 3단계</h3>
+      <label class="field"><span>① 비교 · 무엇이 같고 다른가</span><textarea rows="2" placeholder="공통점/차이점 키워드"></textarea></label>
+      <label class="field"><span>② 적용 · 제시문의 관점을 새 상황에 적용</span><textarea rows="2" placeholder="어떤 기준을 어디에 적용할지"></textarea></label>
+      <label class="field"><span>③ 확장 · 한계·반론·새로운 맥락</span><textarea rows="2" placeholder="반론, 한계, 추가 조건"></textarea></label>
+      <p class="muted small">문장을 완성해서 외우기보다 준비실에서 쓸 키워드 메모처럼 적어보세요.</p>
+    </div>`));
+  }
+  const trackData = trackId ? window.APP_DATA.specialTrackQuestions[trackId] : null;
+  if (trackData) {
+    body.appendChild(el(`<div class="card"><h3>${escapeHtml(trackData.label)}</h3>
+      <p class="muted small">프레임: ${trackData.framework.join(" · ")}</p>
+      <ul>${trackData.samples.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>
+      <p class="notice small">대학별 실제 문항을 이 앱이 임의로 만들지 않습니다. 예시일 뿐입니다.</p>
+    </div>`));
+  } else if (effectiveType !== "제시문 기반" && effectiveType !== "다중 미니(MMI)") {
+    body.appendChild(el(`<p class="muted">해당 계열이 지정되지 않았습니다(기본값은 "해당 없음"). 유형 판별 화면에서 계열 태그를 지정하세요.</p>`));
+  }
+  if (effectiveType === "집단·토론") {
+    body.appendChild(el(`<div class="notice">${escapeHtml(window.APP_DATA.groupDiscussionNote)}</div>`));
+  }
+  if (effectiveType === "다중 미니(MMI)") {
+    body.appendChild(el(`<div class="card"><h3>MMI 방 이동 훈련</h3>
+      <p class="muted small">각 방은 새 평가라고 생각하고 이전 방의 실수를 다음 방으로 끌고 가지 않는 연습을 합니다.</p>
+      <label class="field"><span>문 앞 준비 · 상황의 핵심</span><textarea rows="2" placeholder="누가, 어떤 문제에 놓였는가"></textarea></label>
+      <label class="field"><span>내 판단</span><textarea rows="2" placeholder="먼저 무엇을 하겠는가"></textarea></label>
+      <label class="field"><span>판단 근거와 상대 관점</span><textarea rows="2" placeholder="왜 그렇게 판단했는가 / 상대는 어떻게 볼 수 있는가"></textarea></label>
+      <label class="field checkbox"><input type="checkbox"> 이 방을 마치고 5초 안에 리셋하고 다음 방으로 넘어가는 연습을 했다</label>
+    </div>`));
+  }
+  body.appendChild(el(`<button class="btn-ghost" onclick="navigate('student-dashboard')">학생 홈으로</button>`));
+  return screenShell("특수 면접 / 제시문 대비", "해당하는 학생에게만 필요한 화면입니다.", body);
+});
+
+// ── 면접 직전 모드 / 인쇄 한 장 (§35, §36) ────────────────────────────
+registerRoute("print-sheet", () => {
+  const uni = getActiveUniversity();
+  const dd = uni ? daysUntil(uni.interviewDate) : null;
+  const s = AppState;
+  const body = el(`<div class="stack">
+    ${dd !== null && dd <= 3 ? '<div class="notice">면접 직전 모드입니다. 새 예상질문을 많이 만들기보다, 이미 준비한 것을 점검하세요.</div>' : ''}
+    <label class="field"><span>30초 자기소개 키워드 (60자 이내)</span><input id="p-intro" maxlength="60" value="${escapeHtml(s.introKeywords||"")}"></label>
+    <label class="field"><span>마지막 할 말 (60자 이내)</span><input id="p-last" maxlength="60" value="${escapeHtml(s.lastWord||"")}"></label>
+    <button class="btn-primary" id="save-print-btn">저장</button>
+    <button class="btn-secondary" id="open-print-btn">면접장에 가져갈 한 장 열기 (인쇄)</button>
+    <p class="muted small">학생부 원문 전체는 인쇄물에 넣지 않습니다. 실전 면접실 반입 가능 여부는 대학 안내를 확인하세요. 브라우저·프린터 여백 설정에 따라 실제 출력 결과를 한 번 확인해 보세요.</p>
+  </div>`);
+  body.querySelector("#save-print-btn").onclick = () => {
+    s.introKeywords = body.querySelector("#p-intro").value;
+    s.lastWord = body.querySelector("#p-last").value;
+    toast("저장했습니다.");
+  };
+  body.querySelector("#open-print-btn").onclick = () => openPrintView(s);
+  body.appendChild(buildFlowNav("print-sheet"));
+  return screenShell("면접 직전 모드", "", body);
+});
+
+// ── 학부모 모드 (§37) ────────────────────────────────────────────────
+registerRoute("parent-mode", () => {
+  const g = window.APP_DATA.parentGuide;
+  const near = nearestUniversity();
+  const body = el(`<div class="stack">
+    <div class="card">
+      <h3>가장 가까운 면접</h3>
+      <p>${near ? `${escapeHtml(near.name)} — ${escapeHtml(fmtDday(daysUntil(near.interviewDate)))}` : "등록된 일정이 없습니다."}</p>
+    </div>
+    <div class="card"><h3>부모가 할 일</h3><ul>${g.todo.map((t) => `<li>${escapeHtml(t)}</li>`).join("")}</ul></div>
+    <div class="card"><h3>도움이 되는 말</h3><ul>${g.goodLines.map((t) => `<li>"${escapeHtml(t)}"</li>`).join("")}</ul></div>
+    <div class="card warn"><h3>피해야 할 말</h3><ul>${g.avoidLines.map((t) => `<li>"${escapeHtml(t)}"</li>`).join("")}</ul></div>
+    <button class="btn-secondary" onclick="window.print()">이 화면 인쇄하기 (A4 앞뒤 약 2쪽)</button>
+    <button class="btn-ghost" onclick="navigate('roadmap')">D-Day 로드맵 보기</button>
+  </div>`);
+  return screenShell("학부모 면접 가이드", "가정에서 무엇을, 어떻게 도울지.", body);
+});
+
+// ── 면접 후기 기록 (§38~39) ──────────────────────────────────────────
+registerRoute("interview-log", () => {
+  const body = el(`<div class="stack">
+    <div class="notice small">이름·학번·학교명 입력은 요구하지 않습니다.</div>
+    <label class="field"><span>대학</span><input id="l-uni"></label>
+    <label class="field"><span>학과</span><input id="l-major"></label>
+    <label class="field"><span>전형</span><input id="l-track"></label>
+    <label class="field"><span>면접유형</span><input id="l-type"></label>
+    <label class="field"><span>면접관 수</span><input id="l-count"></label>
+    <label class="field"><span>실제 받은 질문 (줄바꿈으로 구분)</span><textarea id="l-questions" rows="4"></textarea></label>
+    <label class="field"><span>가장 어려웠던 꼬리질문</span><textarea id="l-followup" rows="2"></textarea></label>
+    <label class="field"><span>예상과 달랐던 운영</span><textarea id="l-unexpected" rows="2"></textarea></label>
+    <label class="field"><span>가장 아쉬웠던 답</span><textarea id="l-regret" rows="2"></textarea></label>
+    <label class="field"><span>다음에 바꿀 점 (최대 2개, 줄바꿈)</span><textarea id="l-changes" rows="2"></textarea></label>
+    <button class="btn-primary" id="save-log-btn">기록 저장</button>
+    <hr class="divider">
+    <div id="log-list" class="stack"></div>
+    <div class="row-gap">
+      <button class="btn-secondary" id="export-csv">CSV 내보내기</button>
+      <button class="btn-ghost" id="export-anon">학교 공유용(익명) 내보내기</button>
+    </div>
+    <div id="submit-area"></div>
+  </div>`);
+  body.querySelector("#save-log-btn").onclick = () => {
+    const g = (id) => body.querySelector(id).value;
+    AppState.interviewLogs.push({
+      id: uid("log"), university: g("#l-uni"), major: g("#l-major"), track: g("#l-track"), type: g("#l-type"),
+      interviewerCount: g("#l-count"), questions: g("#l-questions").split("\n").filter(Boolean),
+      hardestFollowUp: g("#l-followup"), unexpected: g("#l-unexpected"), regret: g("#l-regret"),
+      changes: g("#l-changes").split("\n").filter(Boolean).slice(0, 2),
+    });
+    toast("면접 후기를 저장했습니다.");
+    renderLogList();
+  };
+  function renderLogList() {
+    const box = body.querySelector("#log-list");
+    box.innerHTML = "";
+    AppState.interviewLogs.forEach((l) => box.appendChild(el(`<div class="card"><strong>${escapeHtml(l.university)} ${escapeHtml(l.major)}</strong><p class="muted small">${escapeHtml((l.questions||[]).join(" / "))}</p></div>`)));
+  }
+  renderLogList();
+  body.querySelector("#export-csv").onclick = () => exportInterviewLogsCsv(AppState.interviewLogs);
+  body.querySelector("#export-anon").onclick = () => exportInterviewLogsAnonymized(AppState.interviewLogs);
+
+  const submitArea = body.querySelector("#submit-area");
+  if (window.APP_CONFIG.AFTER_INTERVIEW_FORM_URL) {
+    const btn = el(`<button class="btn-primary">면접 후기 학교에 제출하기</button>`);
+    btn.onclick = () => {
+      const ok = confirm("제출 전 확인: 학교명·학생 이름·다른 학생을 특정할 수 있는 표현이 없는지 확인하셨습니까? 외부 폼의 개인정보 처리방침은 학교가 별도 안내합니다.");
+      if (ok) window.open(window.APP_CONFIG.AFTER_INTERVIEW_FORM_URL, "_blank");
+    };
+    submitArea.appendChild(btn);
+  }
+  return screenShell("면접 후기 기록", "끝나자마자 적으세요. 하루만 지나도 기억이 사라집니다.", body);
+});
+
+// ── 데이터 저장/불러오기 (보완: 항목별 포함 여부 선택 + 근거문장 기본 제외) ──
+registerRoute("data-io", () => {
+  const body = el(`<div class="stack">
+    <div class="notice">이 파일에는 대학 정보·활동·질문·후기 등 준비 데이터가 담깁니다. 공용 기기·공용 클라우드에 저장하지 마세요.</div>
+    <p class="label">내보낼 항목 선택</p>
+    <div class="notice small">생활기록부 없이 직접 입력한 활동·기록은 작업 복원을 위해 기본 백업됩니다. 학생부에서 파생된 정리 기록은 아래에서 별도로 선택해야 포함됩니다.</div>
+    <label class="field checkbox"><input type="checkbox" id="opt-uni" checked> 대학 정보(대학명·학과·면접일 등)</label>
+    <label class="field checkbox"><input type="checkbox" id="opt-record-derived"> 학생부에서 파생된 정리 기록까지 포함 (기본 해제 — 학생부 내용 일부가 들어갑니다)</label>
+    <label class="field checkbox"><input type="checkbox" id="opt-act" checked> 핵심활동</label>
+    <label class="field checkbox"><input type="checkbox" id="opt-q" checked> 질문·우선순위</label>
+    <label class="field checkbox"><input type="checkbox" id="opt-log" checked> 면접 후기</label>
+    <label class="field checkbox"><input type="checkbox" id="opt-weak" checked> 설명이 필요한 기록</label>
+    <label class="field checkbox"><input type="checkbox" id="opt-evidence"> 질문의 학생부 근거 문장까지 포함 (기본 해제 — 세특 등 학생부 실제 문장이 그대로 담깁니다)</label>
+    <button class="btn-primary" id="export-btn">내 준비 데이터 저장 (JSON)</button>
+    <hr class="divider">
+    <label class="field"><span>JSON 파일 불러오기</span><input type="file" accept="application/json" id="import-file"></label>
+    <div id="import-status" class="muted small"></div>
+  </div>`);
+  body.querySelector("#export-btn").onclick = () => {
+    exportStateAsJson(AppState, {
+      includeUniversities: body.querySelector("#opt-uni").checked,
+      includeRecordDerived: body.querySelector("#opt-record-derived").checked,
+      includeActivities: body.querySelector("#opt-act").checked,
+      includeQuestions: body.querySelector("#opt-q").checked,
+      includeLogs: body.querySelector("#opt-log").checked,
+      includeWeakness: body.querySelector("#opt-weak").checked,
+      includeEvidence: body.querySelector("#opt-evidence").checked,
+    });
+  };
+  body.querySelector("#import-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const text = await file.text();
+    const result = importStateFromJson(text);
+    body.querySelector("#import-status").textContent = result.ok ? "불러오기 완료." : result.reason;
+    if (result.ok) toast("데이터를 불러왔습니다.");
+  });
+  return screenShell("내 준비 데이터", "", body);
+});

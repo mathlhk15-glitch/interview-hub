@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="2027 대입 면접 준비 허브 — 무료, API 없이 브라우저 안에서 동작하는 면접 준비 웹앱">
+<title>2027 대입 면접 준비 허브</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand"><button onclick="navigate('home')">2027 대입 면접 준비 허브</button></div>
+    <button class="btn-ghost small" onclick="navigate('crisis-card')" aria-label="위기 대응 카드 열기">위기 카드</button>
+  </header>
+  <div class="progress-track"><div id="progress-bar" class="progress-fill"></div></div>
+
+  <main id="view-wrap">
+    <div id="view" role="main"></div>
+  </main>
+
+  <div id="toast-box" class="toast-box" aria-live="polite"></div>
+  <div id="print-mount" aria-hidden="true"></div>
+
+  <!-- 정적 vendor: 로컬 파일만 사용, 외부 CDN 요청 없음 -->
+  <script src="assets/vendor/pdfjs/pdf.min.js"></script>
+
+  <script src="config.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+  <script src="record-parser.js"></script>
+  <script src="question-engine.js"></script>
+  <script src="prompt-generator.js"></script>
+  <script src="ai-result-parser.js"></script>
+  <script src="trainer.js"></script>
+  <script src="print.js"></script>
+  <script src="export.js"></script>
+  <script src="screens.js"></script>
+  <script src="screens2.js"></script>
+</body>
+</html>

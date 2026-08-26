@@ -26,7 +26,8 @@ const AppState = {
   weaknessEntries: [],    // 설명이 필요한 기록 4단계 입력
   commonAnswers: {},      // 빈출 12유형 키워드 { [id]: text }
   mockEvaluation: { checks: {}, good: "", fix: "" }, // 모의면접 자가평가 저장값
-  aiResultSections: null, // 마지막 AI 결과 파싱본 전체(핵심기록/핵심활동/설명필요/확인필요 등)
+  aiResultSections: null, // 마지막 AI 전체분석 결과
+  aiDeepResult: null,     // 마지막 핵심활동 심화분석 결과
   aiVerificationNotes: [], // AI가 "학생이 직접 확인해야 할 내용"으로 표시한 것 중 채택된 항목
   analysisResult: null,    // 자동 면접 분석 결과(핵심기록/질문/설명필요 등)
   analysisUpdatedAt: null, // 마지막 자동분석 시각
@@ -81,7 +82,7 @@ function fmtDday(n) {
 }
 
 function hasImportedStudentRecord() {
-  return AppState.records.some((r) => r.source === "학생부/붙여넣기");
+  return !!(String(AppState.recordRawText || "").trim()) || AppState.records.some((r) => r.source === "학생부/붙여넣기");
 }
 function hasDirectActivityRecords() {
   return AppState.records.some((r) => r.source === "직접 입력");
@@ -146,18 +147,16 @@ function renderRoute() {
 // ── 학생 진행 흐름(STEP) 정의 — 대시보드와 이전/다음 내비게이션이 함께 씁니다 ──
 const FLOW_STEPS = [
   { key: "start",       route: "student-dashboard", num: 1, label: "자료 넣기" },
-  { key: "results",     route: "analysis-results", num: 2, label: "자동 분석 결과" },
-  { key: "questions",   route: "questions",        num: 3, label: "핵심 예상질문" },
-  { key: "trainer",     route: "trainer",          num: 4, label: "말하기 연습" },
-  { key: "print-sheet", route: "print-sheet",      num: 5, label: "면접 직전 한 장" },
+  { key: "ai",          route: "ai-coach",          num: 2, label: "AI 전체 분석" },
+  { key: "trainer",     route: "trainer",           num: 3, label: "말하기 연습" },
+  { key: "print-sheet", route: "print-sheet",       num: 4, label: "면접 직전 한 장" },
 ];
 
 function flowStepStatus(key) {
   switch (key) {
-    case "start": return AppState.records.length > 0;
-    case "results": return !!AppState.analysisResult;
-    case "questions": return AppState.questions.length > 0;
-    case "trainer": return false;
+    case "start": return AppState.records.length > 0 || !!String(AppState.recordRawText || "").trim();
+    case "ai": return !!AppState.aiResultSections;
+    case "trainer": return AppState.questions.length > 0;
     case "print-sheet": return !!(AppState.introKeywords || AppState.questions.length);
     default: return false;
   }

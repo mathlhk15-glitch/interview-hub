@@ -26,7 +26,7 @@ registerRoute("home", () => {
     <button class="menu-card primary-menu" onclick="navigate('student-dashboard')">
       <span class="menu-emoji" aria-hidden="true">🎯</span>
       <span class="menu-title">학생 면접 준비</span>
-      <span class="menu-desc">생활기록부 PDF 하나로 핵심 기록과 예상 면접문항까지</span>
+      <span class="menu-desc">생활기록부 전체를 AI로 분석해 활동별 면접문항까지</span>
     </button>
     <button class="menu-card" onclick="navigate('parent-mode')">
       <span class="menu-emoji" aria-hidden="true">🏠</span>
@@ -45,63 +45,73 @@ registerRoute("home", () => {
     <button class="btn-ghost small" id="theme-toggle-btn" onclick="toggleTheme()">🌙 어둡게</button>
   </div>`);
   return screenShell(window.APP_CONFIG.APP_NAME,
-    "복잡한 체크 없이 자료를 넣으면 면접에서 확인할 핵심 기록과 질문을 자동으로 정리합니다.",
+    "복잡한 체크 없이 자료를 넣고, 원하는 AI로 생활기록부 전체 활동과 면접문항을 분석합니다.",
     body, { noBack: true });
 });
 
 // ── 학생 빠른 시작 — 기본 사용자는 여기서 체크박스를 만지지 않습니다 ─────
 registerRoute("student-dashboard", () => {
   const body = el(`<div class="stack"></div>`);
-  body.appendChild(el(`<div class="hero-card">
-    <div class="hero-kicker">가장 쉬운 시작</div>
-    <h2>생활기록부 PDF를 넣으면 바로 면접문항을 만듭니다</h2>
-    <p>세특·진로·동아리·자율활동에서 면접 가능성이 높은 기록을 자동으로 선별하고, 반드시 준비할 질문과 꼬리질문으로 정리합니다.</p>
-    <button class="btn-primary big" id="quick-pdf-btn">생활기록부 PDF로 바로 시작</button>
-    <button class="btn-secondary" id="quick-no-record-btn">생활기록부 없이 시작</button>
+  body.appendChild(el(`<div class="hero-card ai-first-hero">
+    <div class="hero-kicker">AI 분석 중심 · 무료 · API 없음</div>
+    <h2>생활기록부를 넣고, AI가 전체 활동을 빠짐없이 훑게 하세요</h2>
+    <p>프로그램이 짧은 규칙으로 질문을 억지로 만들지 않습니다. 생활기록부 텍스트를 안전하게 추출한 뒤, 사용자가 선택한 AI가 <strong>전체 활동 목록 → 활동별 예상질문 → A급 필수질문 → 핵심활동 심화</strong> 순으로 분석하도록 프롬프트를 만듭니다.</p>
+    <button class="btn-primary big" id="quick-pdf-btn">1. 생활기록부 PDF 넣기</button>
+    <button class="btn-secondary" id="quick-no-record-btn">생활기록부 없이 내 활동으로 시작</button>
+    <div class="ai-meta-row"><span>서버 저장 없음</span><span>ChatGPT · Claude · Gemini</span><span>프롬프트 복사 방식</span></div>
   </div>`));
   body.querySelector("#quick-pdf-btn").onclick = () => navigate("record-import");
   body.querySelector("#quick-no-record-btn").onclick = () => navigate("no-record-input");
 
-  if (AppState.analysisResult) {
-    body.appendChild(el(`<button class="btn-primary" onclick="navigate('analysis-results')">최근 자동 분석 결과 다시 보기</button>`));
-  }
-
   const hasRecordAi = hasImportedStudentRecord();
   const hasActivityAi = hasDirectActivityRecords();
+  if (AppState.aiResultSections) {
+    body.appendChild(el(`<button class="btn-primary big" onclick="navigate('ai-results')">최근 AI 전체 분석 결과 다시 보기</button>`));
+  }
   if (hasRecordAi) {
-    body.appendChild(el(`<section class="ai-highlight-card" aria-label="생활기록부 기반 AI 심화분석">
-      <div class="ai-highlight-icon" aria-hidden="true">✨</div>
+    body.appendChild(el(`<section class="ai-highlight-card ai-primary-card" aria-label="생활기록부 전체 AI 면접문항 분석">
+      <div class="ai-highlight-icon" aria-hidden="true">AI</div>
       <div class="ai-highlight-copy">
-        <span class="ai-highlight-kicker">선택 기능 · 무료</span>
-        <h3>생활기록부 기반 AI 심화분석</h3>
-        <p>이미 불러온 생활기록부 기록만 골라 더 깊은 예상질문·꼬리질문을 받습니다. 전송할 내용은 복사 전에 직접 확인합니다.</p>
-        <div class="ai-meta-row"><span>API 없음</span><span>자동 전송 없음</span><span>ChatGPT · Claude · Gemini</span></div>
+        <span class="ai-highlight-kicker">가장 먼저 할 일</span>
+        <h3>생활기록부 전체 면접문항 AI 분석</h3>
+        <p>TOP3부터 고르지 않습니다. 먼저 생활기록부의 의미 있는 수업·세특·진로·자율·동아리·공동체 활동을 <strong>가능한 한 모두 찾아 목록화</strong>하고, 활동마다 기본질문과 심화질문을 만든 뒤 중요도를 A/B/C로 분류합니다.</p>
+        <div class="ai-meta-row"><span>전체 활동 인벤토리</span><span>활동별 질문</span><span>누락 점검</span></div>
       </div>
-      <button class="btn-ai-strong" onclick="navigateAiMode('record')">생기부 기반 AI 분석</button>
+      <button class="btn-ai-strong" onclick="navigateAiMode('record-full')">전체 AI 분석 시작</button>
     </section>`));
+
+    if (AppState.aiResultSections) {
+      body.appendChild(el(`<section class="ai-highlight-card" aria-label="핵심활동 AI 심화분석">
+        <div class="ai-highlight-icon" aria-hidden="true">深</div>
+        <div class="ai-highlight-copy">
+          <span class="ai-highlight-kicker">전체 분석 다음 단계</span>
+          <h3>핵심활동 TOP 3 심화분석</h3>
+          <p>전체 활동을 먼저 확인한 뒤, 면접에서 가장 중요한 활동 몇 개만 사실 → 과정·판단 → 개념 → 역할 → 한계 → 전공연결까지 깊게 파고듭니다.</p>
+        </div>
+        <button class="btn-secondary" onclick="navigateAiMode('record-deep')">핵심활동 심화분석</button>
+      </section>`));
+    }
   }
   if (hasActivityAi) {
-    body.appendChild(el(`<section class="ai-highlight-card" aria-label="내 활동 기반 AI 심화분석">
-      <div class="ai-highlight-icon" aria-hidden="true">✨</div>
+    body.appendChild(el(`<section class="ai-highlight-card ai-primary-card" aria-label="내 활동 전체 AI 분석">
+      <div class="ai-highlight-icon" aria-hidden="true">AI</div>
       <div class="ai-highlight-copy">
-        <span class="ai-highlight-kicker">생활기록부 없이도 가능 · 무료</span>
-        <h3>내 활동으로 AI 심화분석</h3>
-        <p>직접 입력한 수업·탐구·협력·진로 경험만 이용해 예상질문과 꼬리질문을 더 정교하게 만듭니다.</p>
-        <div class="ai-meta-row"><span>API 없음</span><span>자동 전송 없음</span><span>원하는 AI 사용</span></div>
+        <span class="ai-highlight-kicker">생활기록부 없이 사용</span>
+        <h3>내 활동 전체 AI 면접문항 분석</h3>
+        <p>직접 적은 활동을 빠짐없이 훑어 활동별 예상질문과 꼬리질문을 만들고, 반드시 준비할 질문을 다시 골라줍니다.</p>
       </div>
-      <button class="btn-ai-strong" onclick="navigateAiMode('activity')">내 활동 AI 분석</button>
+      <button class="btn-ai-strong" onclick="navigateAiMode('activity-full')">내 활동 전체 AI 분석</button>
     </section>`));
   }
 
-  // 대학/학과는 정확도를 조금 높이는 선택 입력입니다. 처음부터 복잡한 배점표를 요구하지 않습니다.
   const active = getActiveUniversity();
   const opt = el(`<details class="optional-panel" ${active ? "open" : ""}>
     <summary>지원 대학·학과 입력 <span class="muted small">(선택)</span></summary>
     <div class="stack optional-panel-body">
-      <p class="muted small">대학·학과를 입력하면 지원동기·전공 연결 질문을 조금 더 맞춤화합니다. 몰라도 건너뛰어도 됩니다.</p>
+      <p class="muted small">대학·학과를 입력하면 AI가 전공 연결과 평가요소를 조금 더 맞춤화합니다. 몰라도 전체 생활기록부 분석은 가능합니다.</p>
       <div class="grid-2">
         <label class="field"><span>대학명</span><input id="quick-uni-name" value="${escapeHtml(active?.name || "")}" placeholder="예: ○○대학교"></label>
-        <label class="field"><span>학과명</span><input id="quick-uni-major" value="${escapeHtml(active?.major || "")}" placeholder="예: 미디어커뮤니케이션학과"></label>
+        <label class="field"><span>학과명</span><input id="quick-uni-major" value="${escapeHtml(active?.major || "")}" placeholder="예: 기계공학과"></label>
       </div>
       <label class="field"><span>전형명</span><input id="quick-uni-track" value="${escapeHtml(active?.track || "")}" placeholder="알고 있으면 입력"></label>
       <button class="btn-secondary" id="save-quick-uni">저장</button>
@@ -117,25 +127,26 @@ registerRoute("student-dashboard", () => {
       uni = { id: uid("uni"), name, major, track, interviewDate:"", checkInTime:"", location:"", duration:"", prepTime:"", interviewerCount:"", ratio:"", stageType:"일괄합산", evalWeights:"", blind:"미확인", promptBased:"미확인", docBased:"미확인", memoAllowed:"미확인", officialChecked:false, schoolViolenceNote:"", typeGuess:"", typeGuessOverride:"", specialTrack:"none", memo:"", sourceLog:[] };
       AppState.universities.push(uni); AppState.activeUniversityId = uni.id;
     } else { uni.name = name; uni.major = major; uni.track = track; }
-    if (AppState.records.length) runAutomaticInterviewAnalysis();
     toast("지원 정보를 저장했습니다.");
   };
   body.appendChild(opt);
 
   const advanced = el(`<details class="optional-panel">
-    <summary>상세 준비 도구 <span class="muted small">(필요할 때만)</span></summary>
-    <div class="tool-grid optional-panel-body">
-      <button class="btn-ghost small" onclick="navigate('record-map')">분석 결과 직접 수정</button>
-      <button class="btn-ghost small" onclick="navigate('type-helper')">면접유형 확인</button>
-      <button class="btn-ghost small" onclick="navigate('roadmap')">D-Day 로드맵</button>
-      <button class="btn-ghost small" onclick="navigate('ai-coach')">AI 도구 전체 보기</button>
-      <button class="btn-ghost small" onclick="navigate('blind-check')">블라인드 점검</button>
-      <button class="btn-ghost small" onclick="navigate('common12')">빈출 12유형</button>
+    <summary>AI 없이 쓰는 보조 도구 <span class="muted small">(선택)</span></summary>
+    <div class="optional-panel-body stack">
+      <div class="notice small">규칙 기반 자동질문은 PDF 표 구조나 줄 순서에 따라 문장이 잘릴 수 있어 <strong>주 분석 기능에서 제외했습니다.</strong> 아래 기능은 확인·보조용으로만 사용하세요.</div>
+      <div class="tool-grid">
+        <button class="btn-ghost small" onclick="navigate('record-map')">추출 텍스트 확인·수정</button>
+        <button class="btn-ghost small" onclick="navigate('type-helper')">면접유형 확인</button>
+        <button class="btn-ghost small" onclick="navigate('roadmap')">D-Day 로드맵</button>
+        <button class="btn-ghost small" onclick="navigate('blind-check')">블라인드 점검</button>
+        <button class="btn-ghost small" onclick="navigate('common12')">빈출 12유형</button>
+        <button class="btn-ghost small" onclick="navigate('analysis-results')">로컬 간단 분석(참고)</button>
+      </div>
     </div>
   </details>`);
   body.appendChild(advanced);
-  body.appendChild(buildFlowNav("start"));
-  return screenShell("학생 면접 준비", "학생은 자료를 넣고 질문에 답하는 데 집중하면 됩니다.", body, { noBack: true });
+  return screenShell("학생 면접 준비", "AI 전체 분석을 중심으로, 사용자는 생활기록부를 넣고 결과를 연습하면 됩니다.", body, { noBack: true });
 });
 
 function startWithoutRecord() { navigate("no-record-input"); }
@@ -152,7 +163,7 @@ registerRoute("no-record-input", () => {
     <div class="notice small">모든 칸을 채울 필요는 없습니다. 기억나는 활동만 짧게 적어도 면접질문을 만들 수 있습니다.</div>
   </div>`);
   compactPrompts.forEach((p, i) => body.appendChild(el(`<label class="field"><span>${i+1}. ${escapeHtml(p)}</span><textarea rows="2" data-idx="${i}" placeholder="키워드나 짧은 문장으로 적어도 됩니다"></textarea></label>`)));
-  const saveBtn = el(`<button class="btn-primary big">입력한 내용으로 면접문항 만들기</button>`);
+  const saveBtn = el(`<button class="btn-primary big">입력한 활동 전체를 AI로 분석하기</button>`);
   saveBtn.onclick = () => {
     const values = Array.from(body.querySelectorAll("textarea")).map((t) => t.value.trim()).filter(Boolean);
     if (!values.length) { toast("활동을 한 가지 이상 적어주세요."); return; }
@@ -162,11 +173,10 @@ registerRoute("no-record-input", () => {
         AppState.records.push({ id: uid("rec"), section: "직접 입력", text: v, tags: [], tagsInitialized: false, source: "직접 입력" });
       }
     });
-    runAutomaticInterviewAnalysis();
-    navigate("analysis-results");
+    navigateAiMode("activity-full");
   };
   body.appendChild(saveBtn);
-  return screenShell("생활기록부 없이 시작", "활동 몇 가지만 적으면 자동으로 핵심 질문을 정리합니다.", body);
+  return screenShell("생활기록부 없이 시작", "기억나는 활동을 적으면 AI가 전체 활동을 훑어 면접질문으로 정리합니다.", body);
 });
 
 // ── STEP1 대학별 면접정보 ────────────────────────────────────────────

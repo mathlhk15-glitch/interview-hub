@@ -170,6 +170,52 @@ function cleanObjects(list, normalizer, key) {
   });
 }
 
+
+function normalizeActivityQuestion(item) {
+  if (typeof item === "string") return { type: "", question: item.trim(), evaluationPoint: "" };
+  const o = item && typeof item === "object" ? item : {};
+  return {
+    type: firstText(o, ["type", "kind", "direction", "category"]),
+    question: firstText(o, ["question", "text", "content", "title"]),
+    evaluationPoint: firstText(o, ["evaluationPoint", "intent", "point", "reason"]),
+  };
+}
+
+function normalizeActivityInventoryItem(item, idx) {
+  if (typeof item === "string") {
+    return { activityId: `A${String(idx + 1).padStart(2, "0")}`, title: item.trim(), area: "", summary: item.trim(), evidenceQuote: "", tags: [], importance: "B", questions: [], followUpQuestions: [] };
+  }
+  const o = item && typeof item === "object" ? item : {};
+  const importanceRaw = firstText(o, ["importance", "priority", "grade"]).toUpperCase();
+  const importance = ["A", "B", "C"].includes(importanceRaw) ? importanceRaw : "B";
+  return {
+    activityId: firstText(o, ["activityId", "id"]) || `A${String(idx + 1).padStart(2, "0")}`,
+    title: firstText(o, ["title", "activity", "name", "topic"]),
+    area: firstText(o, ["area", "section", "source", "evidenceArea"]),
+    summary: firstText(o, ["summary", "detail", "content", "text"]),
+    evidenceQuote: firstText(o, ["evidenceQuote", "evidence", "quote", "sourceText"]),
+    tags: asArray(o.tags || o.categories).map(toPlainText).filter(Boolean).slice(0, 6),
+    importance,
+    questions: asArray(o.questions).map(normalizeActivityQuestion).filter((q) => q.question).slice(0, 8),
+    followUpQuestions: asArray(o.followUpQuestions || o.followUps).map(toPlainText).filter(Boolean).slice(0, 6),
+  };
+}
+
+function normalizeCoverageCheck(value, activityCount) {
+  const o = value && typeof value === "object" ? value : {};
+  const omittedItems = asArray(o.omittedItems).map((x) => {
+    if (typeof x === "string") return { text: x.trim(), reason: "" };
+    const v = x && typeof x === "object" ? x : {};
+    return { text: firstText(v, ["text", "item", "title", "content"]), reason: firstText(v, ["reason", "detail", "description"]) };
+  }).filter((x) => x.text || x.reason);
+  const num = (v, fallback) => Number.isFinite(Number(v)) ? Number(v) : fallback;
+  return {
+    detectedActivityCount: num(o.detectedActivityCount, activityCount),
+    analyzedActivityCount: num(o.analyzedActivityCount, activityCount),
+    omittedItems,
+    coverageNote: firstText(o, ["coverageNote", "note", "summary"]),
+  };
+}
 function normalizeAiJson(parsed) {
   const p = parsed && typeof parsed === "object" ? parsed : {};
   const explanations = cleanObjects(p.needsExplanation, normalizeExplanation, "topic");
@@ -184,7 +230,10 @@ function normalizeAiJson(parsed) {
     evidenceArea: x.evidenceArea,
     evidenceQuote: x.evidenceQuote,
   }));
+  const activityInventory = asArray(p.activityInventory).map(normalizeActivityInventoryItem).filter((x) => x.title || x.summary || x.questions.length);
   return {
+    analysisType: firstText(p, ["analysisType"]) || (activityInventory.length ? "full" : "legacy"),
+    activityInventory,
     coreRecords: cleanObjects(p.coreRecords, normalizeCoreRecord, "summary"),
     coreActivities: cleanObjects(p.coreActivities, normalizeCoreActivity, "title").slice(0, 3),
     priorityA: cleanObjects(p.priorityA, normalizeQuestion, "question"),
@@ -194,6 +243,7 @@ function normalizeAiJson(parsed) {
     interviewerVerificationPoints: [...explicitVerification, ...inferredVerification],
     followUpQuestions: cleanObjects(p.followUpQuestions, normalizeFollowUpGroup),
     needStudentVerification: cleanObjects(p.needStudentVerification, normalizeStudentVerification, "item"),
+    coverageCheck: normalizeCoverageCheck(p.coverageCheck, activityInventory.length),
   };
 }
 

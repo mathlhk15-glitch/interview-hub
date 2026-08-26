@@ -2,7 +2,7 @@
  * screens2.js (2/2)
  */
 
-// ── 생활기록부 빠른 분석 — PDF를 넣으면 자동으로 결과까지 이동 ─────────
+// ── 생활기록부 입력 — 텍스트 추출 후 AI 전체분석으로 이동 ─────────
 registerRoute("record-import", () => {
   const body = el(`<div class="stack">
     <div class="privacy-strip"><strong>개인정보 보호</strong><span>PDF는 서버에 저장하거나 자동 전송하지 않고, 현재 브라우저에서만 읽습니다.</span></div>
@@ -12,15 +12,15 @@ registerRoute("record-import", () => {
       <span class="muted small">또는 이곳에 파일을 끌어다 놓으세요</span>
       <input type="file" accept="application/pdf" id="pdf-input">
     </label>
-    <div id="pdf-status" class="analysis-status muted">파일을 넣으면 자동으로 핵심 기록과 예상질문을 생성합니다.</div>
+    <div id="pdf-status" class="analysis-status muted">파일을 넣으면 텍스트만 추출합니다. 면접문항 분석은 다음 단계에서 AI가 담당합니다.</div>
     <button class="btn-ghost" onclick="navigate('no-record-input')">생활기록부 없이 시작</button>
     <details class="optional-panel">
       <summary>PDF 추출이 잘 안 될 때 직접 붙여넣기</summary>
       <div class="stack optional-panel-body">
-        <p class="muted small">NEIS 또는 PDF에서 복사한 텍스트를 붙여넣으면 전체 내용을 사용해 분석합니다.</p>
+        <p class="muted small">NEIS 또는 PDF에서 복사한 텍스트를 붙여넣으면 전체 내용을 AI 분석 프롬프트에 사용할 수 있습니다.</p>
         <textarea id="paste-text" rows="9" placeholder="생활기록부 텍스트를 붙여넣으세요"></textarea>
         <p id="char-count" class="muted small"></p>
-        <button class="btn-secondary" id="use-paste-btn">붙여넣은 내용 분석하기</button>
+        <button class="btn-secondary" id="use-paste-btn">붙여넣은 내용으로 AI 전체분석</button>
       </div>
     </details>
   </div>`);
@@ -49,13 +49,12 @@ registerRoute("record-import", () => {
       if (result.scanLike) status.innerHTML += `<p class="muted small">스캔 PDF는 자동 OCR하지 않습니다. 아래 '직접 붙여넣기' 또는 '생활기록부 없이 시작'을 이용하세요.</p>`;
       return;
     }
-    status.innerHTML = `<div class="loading-line"><span class="spinner"></span><span>${result.pages}페이지를 읽었습니다. 면접 가능성이 높은 기록을 선별하고 있습니다…</span></div>`;
+    status.innerHTML = `<div class="loading-line"><span class="spinner"></span><span>${result.pages}페이지를 읽었습니다. AI에 보낼 전체 텍스트를 준비하고 있습니다…</span></div>`;
     const drafts = draftRecordsFromText(result.text, null);
-    if (!drafts.length) { status.innerHTML = `<span class="error-text">분석할 기록을 찾지 못했습니다. 직접 붙여넣기를 이용해 주세요.</span>`; return; }
     replaceImportedRecords(drafts, result.text);
-    runAutomaticInterviewAnalysis();
-    status.innerHTML = `<span class="ok-text">분석 완료. 결과 화면으로 이동합니다.</span>`;
-    setTimeout(() => navigate("analysis-results"), 250);
+    AppState.aiResultSections = null;
+    status.innerHTML = `<span class="ok-text">텍스트 추출 완료. AI 전체 면접문항 분석으로 이동합니다.</span>`;
+    setTimeout(() => navigateAiMode("record-full"), 250);
   }
 
   input.onchange = () => analyzePdf(input.files && input.files[0]);
@@ -74,20 +73,19 @@ registerRoute("record-import", () => {
     const text = pasteArea.value.trim();
     if (!text) { toast("텍스트를 붙여넣어 주세요."); return; }
     const drafts = draftRecordsFromText(text, null);
-    if (!drafts.length) { toast("분석할 기록을 찾지 못했습니다."); return; }
     replaceImportedRecords(drafts, text);
-    runAutomaticInterviewAnalysis();
-    navigate("analysis-results");
+    AppState.aiResultSections = null;
+    navigateAiMode("record-full");
   };
   body.appendChild(buildFlowNav("start"));
-  return screenShell("생활기록부로 바로 시작", "PDF를 넣는 것만으로 기본 면접 분석이 끝나도록 설계했습니다.", body);
+  return screenShell("생활기록부 불러오기", "PDF는 텍스트 추출까지만 담당하고, 실제 면접문항 분석은 AI가 수행합니다.", body);
 });
 
 // ── 추출 내용 확인·수정 + 다중 태그 지정 (§11, 보완: 복수 선택 허용) ──
 registerRoute("record-map", () => {
   const body = el(`<div class="stack">
-    <div class="notice small">이 화면은 <strong>선택 기능</strong>입니다. 기본 사용자는 자동 분석 결과만 확인하면 됩니다. 자동 분류가 어색할 때만 기록·영역·태그를 수정하세요.</div>
-    <button class="btn-primary" id="rerun-analysis-btn">수정한 내용으로 다시 자동 분석</button>
+    <div class="notice small">이 화면은 <strong>선택 기능</strong>입니다. AI 전체분석에 보낼 텍스트가 어색하게 추출됐을 때만 기록·영역·태그를 확인하세요.</div>
+    <button class="btn-primary" id="rerun-analysis-btn">수정한 내용으로 로컬 간단 분석</button>
     <div id="rec-list" class="stack"></div>
     <div class="row-gap">
       <button class="btn-ghost small" id="purge-buf-btn">PDF 원문 버퍼만 삭제</button>
@@ -106,7 +104,7 @@ registerRoute("record-map", () => {
     }
   };
   body.appendChild(buildFlowNav("record"));
-  return screenShell("상세 분석 수정", "자동 분석 결과를 교정하고 싶을 때만 사용합니다.", body);
+  return screenShell("추출 기록 상세 수정", "PDF 텍스트 추출이 어색할 때만 사용합니다.", body);
 });
 
 function autoTagsFromText(text, section) {
@@ -156,7 +154,7 @@ function renderRecordList(list) {
 }
 
 
-// ── 자동 분석 결과 — 기본 학생이 가장 오래 머무는 핵심 화면 ───────────
+// ── 로컬 간단 분석 — AI 없이 확인할 때만 쓰는 참고 화면 ───────────
 function tagBadgesHtml(tags) {
   const map = { career: "◎ 진로·전공", academic: "■ 학업·탐구", community: "▲ 공동체", explain: "✕ 설명 필요" };
   return (tags || []).map((t) => map[t] ? `<span class="mini-tag tag-${t}">${map[t]}</span>` : "").join(" ");
@@ -184,13 +182,13 @@ registerRoute("analysis-results", () => {
   if (!result && AppState.records.length) result = runAutomaticInterviewAnalysis();
   if (!result) {
     const body = el(`<div class="stack"><div class="notice">분석할 자료가 없습니다. 생활기록부 PDF를 넣거나 활동을 직접 입력해 주세요.</div><button class="btn-primary" onclick="navigate('record-import')">생활기록부 PDF 넣기</button><button class="btn-secondary" onclick="navigate('no-record-input')">직접 입력하기</button></div>`);
-    return screenShell("자동 면접 분석 결과", "자료를 넣으면 핵심 질문을 자동으로 정리합니다.", body);
+    return screenShell("로컬 간단 분석(참고)", "AI 전체분석을 사용할 수 없을 때만 참고용으로 사용하세요.", body);
   }
 
   const uni = getActiveUniversity();
   const body = el(`<div class="stack">
     <div class="analysis-hero">
-      <div><span class="hero-kicker">자동 분석 완료</span><h2>${result.universityLabel ? escapeHtml(result.universityLabel) + " 기준" : "생활기록부 기준"} 면접 준비 지도</h2></div>
+      <div><span class="hero-kicker">로컬 참고 분석</span><h2>${result.universityLabel ? escapeHtml(result.universityLabel) + " 기준" : "생활기록부 기준"} 면접 준비 지도</h2></div>
       <div class="stat-grid">
         <div class="stat-card"><strong>${result.coreRecords.length}</strong><span>핵심 기록</span></div>
         <div class="stat-card"><strong>${result.mandatoryQuestions.length}</strong><span>필수 질문</span></div>
@@ -224,7 +222,7 @@ registerRoute("analysis-results", () => {
     <details class="optional-panel">
       <summary>기타 상세 도구 <span class="muted small">(선택)</span></summary>
       <div class="tool-grid optional-panel-body">
-        <button class="btn-ghost small" onclick="navigate('record-map')">자동 분석 결과 직접 수정</button>
+        <button class="btn-ghost small" onclick="navigate('record-map')">추출 기록 직접 수정</button>
         <button class="btn-ghost small" onclick="navigate('universities')">대학 면접정보 상세 입력</button>
         <button class="btn-ghost small" onclick="navigate('blind-check')">블라인드 점검</button>
       </div>
@@ -233,15 +231,15 @@ registerRoute("analysis-results", () => {
 
   const aiEntry = body.querySelector("#analysis-ai-entry");
   if (hasImportedStudentRecord()) {
-    aiEntry.appendChild(el(`<section class="ai-highlight-card result-ai-highlight" aria-label="생활기록부 기반 AI 심화분석">
+    aiEntry.appendChild(el(`<section class="ai-highlight-card result-ai-highlight" aria-label="생활기록부 전체 AI 분석">
       <div class="ai-highlight-icon" aria-hidden="true">✨</div>
       <div class="ai-highlight-copy">
-        <span class="ai-highlight-kicker">선택 기능 · 무료</span>
-        <h3>생활기록부 기반 AI 심화분석</h3>
-        <p>방금 분석한 생활기록부 기록을 바탕으로 더 깊은 질문과 꼬리질문을 받습니다. 생기부 전체가 자동 전송되지는 않습니다.</p>
+        <span class="ai-highlight-kicker">권장 분석 · 무료</span>
+        <h3>생활기록부 전체 AI 분석으로 전환</h3>
+        <p>로컬 질문보다 AI가 전체 학생부의 의미 있는 활동을 먼저 찾고 활동별 질문을 만드는 방식을 권장합니다.</p>
         <div class="ai-meta-row"><span>API 없음</span><span>전송 범위 직접 선택</span><span>ChatGPT · Claude · Gemini</span></div>
       </div>
-      <button class="btn-ai-strong" onclick="navigateAiMode('record')">생기부 기반 AI 분석</button>
+      <button class="btn-ai-strong" onclick="navigateAiMode('record-full')">전체 AI 분석 시작</button>
     </section>`));
   }
   if (hasDirectActivityRecords()) {
@@ -344,9 +342,8 @@ registerRoute("activities", () => {
 
 // ── 핵심 예상질문 — 자동생성 결과를 우선순위별로 바로 보여줍니다 ─────────
 registerRoute("questions", () => {
-  if (!AppState.questions.length && AppState.records.length) runAutomaticInterviewAnalysis();
   const body = el(`<div class="stack">
-    <div class="notice small">질문은 학생부의 실제 기록을 근거로 자동 선별했습니다. A부터 먼저 연습하고, B는 여유가 있을 때 준비하세요.</div>
+    <div class="notice small">여기에는 AI 전체분석 결과에서 사용자가 저장하거나 연습한 질문이 모입니다. 새 질문을 만들려면 생활기록부 전체 AI 분석을 이용하세요.</div>
     <div class="tab-bar">
       <button class="btn-primary small" data-filter="A">A · 반드시 준비</button>
       <button class="btn-ghost small" data-filter="B">B · 준비 권장</button>
@@ -507,20 +504,24 @@ registerRoute("motivation", () => {
 // ── AI 면접 코치 (§18~26, 보완: 단일기록 실선택 + feedback도 동일 안전절차 + 전체 필드 노출) ──
 registerRoute("ai-coach", (params) => {
   const requested = params && params.mode ? params.mode : "";
-  const validModes = ["record", "activity", "single", "feedback"];
+  const validModes = ["record-full", "activity-full", "record-deep", "single", "feedback", "record", "activity"];
   const directMode = validModes.includes(requested) ? requested : "";
   const titles = {
-    record: ["생활기록부 기반 AI 심화분석", "불러온 생활기록부 중 필요한 기록만 골라 더 깊은 예상질문과 꼬리질문을 만듭니다."],
-    activity: ["내 활동으로 AI 심화분석", "생활기록부 없이 직접 입력한 경험만 이용해 더 정교한 면접질문을 만듭니다."],
+    "record-full": ["생활기록부 전체 면접문항 AI 분석", "핵심 몇 개만 고르기 전에 생활기록부의 의미 있는 활동을 가능한 한 빠짐없이 찾고, 활동별 질문을 만든 뒤 중요도를 분류합니다."],
+    "activity-full": ["내 활동 전체 면접문항 AI 분석", "직접 입력한 모든 활동을 먼저 목록화하고 활동별 면접질문을 만든 뒤 핵심 질문을 선별합니다."],
+    "record-deep": ["핵심활동 TOP 3 AI 심화분석", "전체 분석에서 선정된 핵심활동을 사실·과정·판단·개념·역할·한계·전공연결까지 깊게 분석합니다."],
+    record: ["생활기록부 AI 분석", "불러온 생활기록부를 AI로 분석합니다."],
+    activity: ["내 활동 AI 분석", "직접 입력한 경험을 AI로 분석합니다."],
     single: ["선택 기록 AI 집중분석", "기록 하나만 골라 개인정보 전송 범위를 최소화하면서 깊게 분석합니다."],
     feedback: ["내 답변 AI 피드백", "내가 작성한 답변을 AI가 대신 고쳐 쓰지 않고, 잘된 점·보완점·꼬리질문만 점검합니다."],
   };
   const body = el(`<div class="stack">
     <div class="notice">AI API를 쓰지 않습니다. 프롬프트를 만들어 복사한 뒤, 평소 쓰는 AI에 붙여넣고 결과를 다시 이 화면에 붙여넣습니다.</div>
     <div class="menu-grid three" id="ai-mode-menu">
-      <button class="menu-card small" data-mode="record"><span class="menu-title">생활기록부 기반 AI 심화분석</span><span class="menu-desc">불러온 생기부 기록만 사용</span></button>
-      <button class="menu-card small" data-mode="activity"><span class="menu-title">내 활동으로 AI 심화분석</span><span class="menu-desc">직접 입력한 활동만 사용</span></button>
-      <button class="menu-card small" data-mode="feedback"><span class="menu-title">내 답변 AI 피드백</span><span class="menu-desc">답변의 잘된 점·보완점·꼬리질문</span></button>
+      <button class="menu-card small primary-menu" data-mode="record-full"><span class="menu-title">생활기록부 전체 AI 분석</span><span class="menu-desc">전체 활동 인벤토리 → 활동별 질문 → A/B/C 분류</span></button>
+      <button class="menu-card small" data-mode="record-deep"><span class="menu-title">핵심활동 TOP3 심화</span><span class="menu-desc">전체 분석 후 중요한 활동만 깊게</span></button>
+      <button class="menu-card small" data-mode="activity-full"><span class="menu-title">내 활동 전체 AI 분석</span><span class="menu-desc">생활기록부 없이 직접 입력한 활동 전체</span></button>
+      <button class="menu-card small" data-mode="feedback"><span class="menu-title">내 답변 AI 피드백</span><span class="menu-desc">잘된 점·보완점·꼬리질문</span></button>
       <button class="menu-card small" data-mode="single"><span class="menu-title">기록 하나만 집중분석</span><span class="menu-desc">전송 범위를 최소화한 고급 기능</span></button>
     </div>
     <div id="ai-wizard"></div>
@@ -538,7 +539,7 @@ registerRoute("ai-coach", (params) => {
     switchBtn.onclick = () => { menu.style.display = "grid"; switchBtn.remove(); };
     body.insertBefore(switchBtn, mount);
   }
-  body.appendChild(buildFlowNav("ai-coach"));
+  body.appendChild(buildFlowNav("ai"));
   const copy = titles[directMode] || ["AI 면접 코치 활용하기", "학생 답을 AI가 대신 만드는 것이 아니라, AI가 더 좋은 질문을 던지게 합니다."];
   return screenShell(copy[0], copy[1], body);
 });
@@ -558,10 +559,21 @@ function renderAiWizard(mount, mode) {
   }
 
   function recordsForMode() {
-    if (mode === "record") return AppState.records.filter((r) => r.source === "학생부/붙여넣기");
-    if (mode === "activity") return AppState.records.filter((r) => r.source === "직접 입력");
+    if (["record-full", "record-deep", "record"].includes(mode)) return AppState.records.filter((r) => r.source === "학생부/붙여넣기");
+    if (["activity-full", "activity"].includes(mode)) return AppState.records.filter((r) => r.source === "직접 입력");
     return AppState.records;
   }
+  function rawRecordTextForAi() {
+    const raw = String(AppState.recordRawText || "").trim();
+    if (raw) return raw.replace(/\u0000/g, "").replace(/[ \t]+\n/g, "\n").replace(/\n{4,}/g, "\n\n\n");
+    return recordsForMode().map((r) => `[${r.section}]\n${r.text}`).join("\n\n");
+  }
+  function deepFocusText() {
+    const core = AppState.aiResultSections?.coreActivities || [];
+    if (!core.length) return "";
+    return core.slice(0, 3).map((x, i) => `핵심활동 ${i + 1}\n제목: ${x.title || ""}\n영역: ${x.area || ""}\n선정 이유: ${x.why || ""}\n근거 원문: ${x.evidenceQuote || ""}`).join("\n\n");
+  }
+
   function bySectionMap(records) {
     const bySection = {};
     (records || recordsForMode()).forEach((r) => { (bySection[r.section] = bySection[r.section] || []).push(r); });
@@ -575,6 +587,39 @@ function renderAiWizard(mount, mode) {
       wizard.appendChild(ta);
       const next = el(`<button class="btn-primary">다음</button>`);
       next.onclick = () => { state.answerDraft = ta.value; state.step = 2; renderStep(); };
+      wizard.appendChild(next);
+      return;
+    }
+    if (mode === "record-full") {
+      wizard.appendChild(el(`<h3>단계 1 · 생활기록부 전체를 분석합니다</h3>`));
+      const raw = rawRecordTextForAi();
+      if (!raw) {
+        wizard.appendChild(el(`<div class="notice small">불러온 생활기록부가 없습니다. 먼저 PDF를 넣어주세요.</div>`));
+        return;
+      }
+      wizard.appendChild(el(`<div class="ai-full-scope-card"><strong>분석 범위: 전체 생활기록부</strong><p>${raw.length.toLocaleString()}자 · 핵심 몇 개를 먼저 고르지 않고 의미 있는 활동을 가능한 한 모두 찾도록 요청합니다.</p><ul><li>활동 인벤토리 전체 작성</li><li>각 활동별 기본·심화 질문 생성</li><li>A/B/C 우선순위 재분류</li><li>누락 가능 항목 자체 점검</li></ul></div>`));
+      const next = el(`<button class="btn-primary big">다음 · 개인정보 확인</button>`);
+      next.onclick = () => { state.step = 2; renderStep(); };
+      wizard.appendChild(next);
+      return;
+    }
+    if (mode === "activity-full") {
+      const records = recordsForMode();
+      wizard.appendChild(el(`<h3>단계 1 · 직접 입력한 활동 전체를 분석합니다</h3>`));
+      if (!records.length) { wizard.appendChild(el(`<div class="notice small">직접 입력한 활동이 없습니다. 먼저 활동을 입력하세요.</div>`)); return; }
+      wizard.appendChild(el(`<div class="ai-full-scope-card"><strong>${records.length}개 입력 활동 전체</strong><p>일부만 고르지 않고 모두 AI 분석 범위에 포함합니다.</p></div>`));
+      const next = el(`<button class="btn-primary big">다음 · 개인정보 확인</button>`);
+      next.onclick = () => { state.step = 2; renderStep(); };
+      wizard.appendChild(next);
+      return;
+    }
+    if (mode === "record-deep") {
+      const focus = deepFocusText();
+      wizard.appendChild(el(`<h3>단계 1 · 핵심활동 TOP 3를 깊게 분석합니다</h3>`));
+      if (!focus) { wizard.appendChild(el(`<div class="notice small">먼저 [생활기록부 전체 AI 분석]을 완료해 핵심활동을 선정해 주세요.</div>`)); return; }
+      wizard.appendChild(el(`<pre class="preview-box">${escapeHtml(focus)}</pre>`));
+      const next = el(`<button class="btn-primary big">다음 · 개인정보 확인</button>`);
+      next.onclick = () => { state.step = 2; renderStep(); };
       wizard.appendChild(next);
       return;
     }
@@ -600,7 +645,7 @@ function renderAiWizard(mount, mode) {
       return;
     }
     const records = recordsForMode();
-    const sourceLabel = mode === "record" ? "생활기록부 기록" : mode === "activity" ? "직접 입력한 활동" : "학생 자료";
+    const sourceLabel = ["record", "record-full", "record-deep"].includes(mode) ? "생활기록부 기록" : ["activity", "activity-full"].includes(mode) ? "직접 입력한 활동" : "학생 자료";
     wizard.appendChild(el(`<h3>단계 1 · AI에 보낼 ${sourceLabel} 선택</h3>`));
     if (mode === "activity") {
       if (!records.length) wizard.appendChild(el(`<div class="notice small">직접 입력한 활동이 없습니다. 먼저 [생활기록부 없이 시작]에서 활동을 입력하세요.</div>`));
@@ -637,6 +682,9 @@ function renderAiWizard(mount, mode) {
 
   function collectSelectedText() {
     if (mode === "feedback") return state.answerDraft;
+    if (mode === "record-full") return rawRecordTextForAi();
+    if (mode === "activity-full") return recordsForMode().map((r) => `[${r.section}]\n- ${r.text}`).join("\n\n");
+    if (mode === "record-deep") return deepFocusText();
     if (mode === "single") {
       const r = AppState.records.find((x) => x.id === state.selectedRecordId);
       return r ? `[${r.section}]\n- ${r.text}` : "";
@@ -719,8 +767,10 @@ function renderAiWizard(mount, mode) {
       }
       const parsed = tryParseAiJson(resultTa.value);
       if (parsed.ok) {
-        toast("AI 심화분석 결과를 정리했습니다.");
-        renderAiAnalysisResult(resultBox, parsed.data);
+        if (mode === "record-deep") AppState.aiDeepResult = parsed.data;
+        else AppState.aiResultSections = parsed.data;
+        toast(mode === "record-deep" ? "핵심활동 심화분석 결과를 정리했습니다." : "AI 전체분석 결과를 정리했습니다.");
+        renderAiAnalysisResult(resultBox, parsed.data, { mode });
       } else {
         renderAiUnparsedResult(resultBox, resultTa.value);
       }
@@ -732,6 +782,18 @@ function renderAiWizard(mount, mode) {
 
   renderStep();
 }
+
+
+registerRoute("ai-results", () => {
+  const body = el(`<div class="stack"></div>`);
+  if (!AppState.aiResultSections) {
+    body.appendChild(el(`<div class="notice">저장된 AI 전체 분석 결과가 없습니다. 생활기록부를 불러온 뒤 전체 AI 분석을 먼저 진행하세요.</div>`));
+    body.appendChild(el(`<button class="btn-primary" onclick="navigateAiMode('record-full')">전체 AI 분석 시작</button>`));
+  } else {
+    renderAiAnalysisResult(body, AppState.aiResultSections, { mode: "record-full" });
+  }
+  return screenShell("AI 전체 면접분석 결과", "전체 활동을 먼저 확인하고, A급 질문과 핵심활동부터 연습하세요.", body);
+});
 
 
 function countAiArray(data, key) {
@@ -920,50 +982,148 @@ function appendAiCleanSection(box, title, subtitle, items, renderer, collapsed) 
   box.appendChild(section);
 }
 
-function renderAiAnalysisResult(box, data) {
-  const counts = {
-    coreActivities: countAiArray(data, "coreActivities"),
-    priorityA: countAiArray(data, "priorityA"),
-    priorityB: countAiArray(data, "priorityB"),
-    checkPoints: countAiArray(data, "needsExplanation") + countAiArray(data, "interviewerVerificationPoints"),
-  };
-  const hero = el(`<div class="ai-result-hero">
-    <div><span class="hero-kicker">AI 심화분석 완료</span><h2>면접 준비에 필요한 결과만 정리했습니다</h2></div>
-    <div class="stat-grid ai-result-stats">
-      <div class="stat-card"><strong>${counts.coreActivities}</strong><span>핵심 활동</span></div>
-      <div class="stat-card"><strong>${counts.priorityA}</strong><span>필수 질문</span></div>
-      <div class="stat-card"><strong>${counts.priorityB}</strong><span>권장 질문</span></div>
-      <div class="stat-card"><strong>${counts.checkPoints}</strong><span>확인 포인트</span></div>
+
+function aiActivityInventoryCard(activity, idx) {
+  const importance = ["A", "B", "C"].includes(activity.importance) ? activity.importance : "B";
+  const details = el(`<details class="card ai-activity-inventory-card" ${importance === "A" ? "open" : ""}>
+    <summary>
+      <span class="activity-index">${idx + 1}</span>
+      <span class="activity-summary-main"><strong>${escapeHtml(activity.title || `활동 ${idx + 1}`)}</strong><span class="muted small">${escapeHtml(activity.area || "영역 미표시")}</span></span>
+      <span class="priority-pill priority-${importance.toLowerCase()}">${importance}</span>
+    </summary>
+    <div class="activity-inventory-body">
+      ${activity.summary ? `<p>${escapeHtml(activity.summary)}</p>` : ""}
+      ${(activity.tags || []).length ? `<div class="tag-line">${activity.tags.map((t) => `<span class="mini-tag">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
+      ${aiEvidenceHtml(activity.area, activity.evidenceQuote, "근거 원문이 포함되지 않았습니다. 학생부에서 해당 활동을 확인하세요.")}
+      <div class="activity-question-list"></div>
+      <div class="activity-followup-list"></div>
     </div>
-    <p class="muted small">질문마다 가능한 경우 학생부 근거를 함께 표시합니다. AI가 제안한 사실성 내용은 실제 학생부·경험과 일치하는지 확인한 뒤에만 저장하세요.</p>
+  </details>`);
+  const qList = details.querySelector(".activity-question-list");
+  if ((activity.questions || []).length) {
+    qList.appendChild(el(`<h4>이 활동에서 준비할 질문</h4>`));
+    activity.questions.forEach((q, qidx) => {
+      const qObj = {
+        question: q.question,
+        evidenceArea: activity.area,
+        evidenceQuote: activity.evidenceQuote,
+        evaluationPoint: q.evaluationPoint || q.type || "",
+      };
+      const row = el(`<div class="inventory-question-row">
+        <div><span class="question-type">${escapeHtml(q.type || `질문 ${qidx + 1}`)}</span><strong>${escapeHtml(q.question || "")}</strong>${q.evaluationPoint ? `<small>${escapeHtml(q.evaluationPoint)}</small>` : ""}</div>
+        <div class="row-gap"><button class="btn-primary small practice-btn">30·60초 연습</button><button class="btn-ghost small save-btn">질문 저장</button></div>
+      </div>`);
+      row.querySelector(".practice-btn").onclick = () => { const saved = findOrCreateAiQuestion(qObj, importance); if (saved) navigate("trainer", { qid: saved.id }); };
+      row.querySelector(".save-btn").onclick = (e) => { findOrCreateAiQuestion(qObj, importance); e.currentTarget.textContent = "저장됨"; e.currentTarget.disabled = true; toast("질문을 저장했습니다."); };
+      qList.appendChild(row);
+    });
+  } else qList.appendChild(el(`<p class="muted small">이 활동의 질문이 비어 있습니다. AI에게 해당 활동 질문을 추가해 달라고 요청하세요.</p>`));
+  const fList = details.querySelector(".activity-followup-list");
+  if ((activity.followUpQuestions || []).length) {
+    fList.appendChild(el(`<h4>예상 꼬리질문</h4>`));
+    const ul = el(`<ul class="followup-bullets"></ul>`);
+    activity.followUpQuestions.forEach((q) => ul.appendChild(el(`<li>${escapeHtml(q)}</li>`)));
+    fList.appendChild(ul);
+  }
+  return details;
+}
+
+function renderCoverageSummary(data) {
+  const cc = data.coverageCheck || {};
+  const analyzed = Number(cc.analyzedActivityCount || (data.activityInventory || []).length || 0);
+  const detected = Number(cc.detectedActivityCount || analyzed);
+  const omitted = Array.isArray(cc.omittedItems) ? cc.omittedItems : [];
+  const box = el(`<div class="coverage-card">
+    <div class="row-between"><strong>전체 활동 누락 점검</strong><span class="badge">${analyzed}개 분석</span></div>
+    <p>AI가 의미 있는 활동을 <strong>${detected}개</strong> 찾았고, 그중 <strong>${analyzed}개</strong>를 활동 인벤토리로 분석했다고 보고했습니다.</p>
+    ${cc.coverageNote ? `<p class="muted small">${escapeHtml(cc.coverageNote)}</p>` : ""}
+    <div class="coverage-omitted"></div>
+  </div>`);
+  const omittedBox = box.querySelector(".coverage-omitted");
+  if (omitted.length) {
+    const d = el(`<details><summary>활동에서 제외한 항목 ${omitted.length}개 확인</summary><ul></ul></details>`);
+    omitted.forEach((x) => d.querySelector("ul").appendChild(el(`<li>${escapeHtml(x.text || "")}${x.reason ? ` — ${escapeHtml(x.reason)}` : ""}</li>`)));
+    omittedBox.appendChild(d);
+  }
+  return box;
+}
+
+function renderAiAnalysisResult(box, data, options) {
+  options = options || {};
+  const inventory = Array.isArray(data.activityInventory) ? data.activityInventory : [];
+  const activityQuestionCount = inventory.reduce((sum, a) => sum + (a.questions || []).length, 0);
+  const followUpCount = inventory.reduce((sum, a) => sum + (a.followUpQuestions || []).length, 0);
+  const counts = {
+    activities: inventory.length,
+    questions: activityQuestionCount,
+    priorityA: countAiArray(data, "priorityA"),
+    coreActivities: countAiArray(data, "coreActivities"),
+  };
+  const isFull = inventory.length > 0 && options.mode !== "record-deep";
+  const hero = el(`<div class="ai-result-hero ai-first-result-hero">
+    <div><span class="hero-kicker">${options.mode === "record-deep" ? "핵심활동 AI 심화분석 완료" : "생활기록부 전체 AI 분석 완료"}</span><h2>${isFull ? "전체 활동을 먼저 찾고, 그다음 중요한 질문을 골랐습니다" : "핵심 활동을 깊게 분석했습니다"}</h2></div>
+    <div class="stat-grid ai-result-stats">
+      <div class="stat-card"><strong>${counts.activities}</strong><span>분석 활동</span></div>
+      <div class="stat-card"><strong>${counts.questions}</strong><span>활동별 질문</span></div>
+      <div class="stat-card"><strong>${counts.priorityA}</strong><span>A급 필수질문</span></div>
+      <div class="stat-card"><strong>${followUpCount}</strong><span>활동별 꼬리질문</span></div>
+    </div>
+    <p class="muted small">AI 결과는 질문을 넓게 찾기 위한 보조자료입니다. 모든 사실·수치·역할은 학생부 원문과 본인의 실제 경험을 기준으로 확인하세요.</p>
   </div>`);
   box.appendChild(hero);
+
+  if (inventory.length) box.appendChild(renderCoverageSummary(data));
+
   if (counts.priorityA > 0) {
     const firstA = data.priorityA[0];
     const startBtn = el(`<button class="btn-primary big ai-start-practice">A급 필수 질문부터 연습하기</button>`);
-    startBtn.onclick = () => {
-      const q = findOrCreateAiQuestion(firstA, "A");
-      if (q) navigate("trainer", { qid: q.id });
-    };
+    startBtn.onclick = () => { const q = findOrCreateAiQuestion(firstA, "A"); if (q) navigate("trainer", { qid: q.id }); };
     box.appendChild(startBtn);
   }
 
-  appendAiCleanSection(box, "핵심 활동 후보 TOP 3", "면접에서 깊게 설명하기 좋은 활동 후보입니다. 실제 경험과 일치하는 활동만 저장하세요.", data.coreActivities, (x) => aiFactCleanCard(x, "coreActivities"), false);
-  appendAiCleanSection(box, "핵심 기록", "면접관이 질문을 만들 때 근거가 될 수 있는 기록입니다. JSON 원문이 아니라 학생이 읽기 쉬운 형태로 표시합니다.", data.coreRecords, (x) => aiFactCleanCard(x, "coreRecords"), false);
-  appendAiCleanSection(box, "A · 반드시 준비할 질문", "가장 먼저 30초·60초로 말해보세요. 근거 학생부가 보이면 반드시 함께 확인하세요.", data.priorityA, (x) => aiQuestionCleanCard(x, "A", "A · 반드시 준비"), false);
-  appendAiCleanSection(box, "B · 준비 권장 질문", "A 질문을 준비한 뒤 개념·세부 과정까지 이어서 연습하세요.", data.priorityB, (x) => aiQuestionCleanCard(x, "B", "B · 준비 권장"), false);
-  appendAiCleanSection(box, "예상 꼬리질문", "활동명만 보여주지 않고 실제로 답할 수 있는 질문 문장으로 표시합니다.", data.followUpQuestions, (x) => aiFollowUpGroupCard(x), false);
-  appendAiCleanSection(box, "설명이 필요한 기록", "성적 변화·출결·진로 변경·선택과목처럼 학생부의 객관적 사실에 대해 설명을 준비할 항목입니다.", data.needsExplanation, (x) => aiFactCleanCard(x, "needsExplanation"), false);
-  appendAiCleanSection(box, "면접관이 확인할 가능성이 높은 부분", "활동 수준·실제 수행 범위·본인 역할·관심사의 연결성처럼 진위와 깊이를 확인할 수 있는 지점입니다.", data.interviewerVerificationPoints, (x) => aiInterviewerVerificationCard(x), false);
-  appendAiCleanSection(box, "C · 여유가 있으면", "시간이 남을 때 확인하세요.", data.priorityC, (x) => aiQuestionCleanCard(x, "C", "C · 여유가 있으면"), true);
-  appendAiCleanSection(box, "학생이 직접 확인할 내용", "AI가 자료만으로 확정할 수 없는 부분입니다. 원문과 공식자료를 직접 확인하세요.", data.needStudentVerification, (x) => aiVerificationCard(x), true);
+  appendAiCleanSection(box, "A · 반드시 준비할 질문", "전체 활동을 훑은 뒤 다시 선별한 최우선 질문입니다.", data.priorityA, (x) => aiQuestionCleanCard(x, "A", "A · 반드시 준비"), false);
 
-  if (counts.priorityA > 0) {
-    box.appendChild(el(`<div class="card ai-next-action"><strong>A급 질문부터 바로 연습하세요.</strong><p class="muted small">질문을 누르면 근거 문구를 유지한 채 질문은행에 저장되고 말하기 훈련으로 이동합니다.</p></div>`));
+  if (inventory.length) {
+    const sec = el(`<section class="ai-result-section full-inventory-section">
+      <div class="section-head"><div><h2>활동별 전체 예상질문</h2><p class="muted small">핵심활동만 보지 않고 AI가 찾아낸 의미 있는 활동 전체입니다. A 활동은 펼쳐서, B/C 활동은 필요할 때 열어보세요.</p></div><span class="rank-badge">${inventory.length}개 활동</span></div>
+      <div class="inventory-filter-row"><button class="btn-primary small" data-inv="ALL">전체</button><button class="btn-ghost small" data-inv="A">A</button><button class="btn-ghost small" data-inv="B">B</button><button class="btn-ghost small" data-inv="C">C</button></div>
+      <div class="activity-inventory-list stack"></div>
+    </section>`);
+    const list = sec.querySelector(".activity-inventory-list");
+    let filter = "ALL";
+    function draw() {
+      list.innerHTML = "";
+      const pool = inventory.filter((a) => filter === "ALL" || a.importance === filter);
+      pool.forEach((a) => list.appendChild(aiActivityInventoryCard(a, inventory.indexOf(a))));
+      if (!pool.length) list.appendChild(el(`<p class="muted">해당 등급의 활동이 없습니다.</p>`));
+      sec.querySelectorAll("[data-inv]").forEach((b) => b.className = b.dataset.inv === filter ? "btn-primary small" : "btn-ghost small");
+    }
+    sec.querySelectorAll("[data-inv]").forEach((b) => b.onclick = () => { filter = b.dataset.inv; draw(); });
+    draw();
+    box.appendChild(sec);
   }
-  box.appendChild(el(`<div class="notice small">AI 분석 결과는 참고자료입니다. 학생부 원문과 대학 모집요강을 기준으로 최종 확인하세요. 근거가 없는 AI 제안은 사실로 단정하지 마세요.</div>`));
-}
 
+  appendAiCleanSection(box, "B · 준비 권장 질문", "A 질문 다음에 준비하세요.", data.priorityB, (x) => aiQuestionCleanCard(x, "B", "B · 준비 권장"), true);
+  appendAiCleanSection(box, "C · 여유가 있으면", "시간이 남을 때 확인하세요.", data.priorityC, (x) => aiQuestionCleanCard(x, "C", "C · 여유가 있으면"), true);
+
+  appendAiCleanSection(box, "핵심 활동 후보 TOP 3", "전체 활동을 먼저 분석한 뒤 면접에서 가장 깊게 설명할 후보를 골랐습니다.", data.coreActivities, (x) => aiFactCleanCard(x, "coreActivities"), false);
+  if (data.coreActivities && data.coreActivities.length && options.mode !== "record-deep") {
+    const deepBtn = el(`<button class="btn-ai-strong deep-analysis-next">핵심활동 TOP 3 더 깊게 분석하기</button>`);
+    deepBtn.onclick = () => navigateAiMode("record-deep");
+    box.appendChild(deepBtn);
+  }
+
+  appendAiCleanSection(box, "설명이 필요한 기록", "성적 변화·출결·진로 변경·선택과목처럼 객관적 설명을 준비할 항목입니다.", data.needsExplanation, (x) => aiFactCleanCard(x, "needsExplanation"), false);
+  appendAiCleanSection(box, "면접관이 확인할 가능성이 높은 부분", "실제 수행 범위·본인 역할·탐구의 깊이·관심사 연결성을 확인할 수 있는 지점입니다.", data.interviewerVerificationPoints, (x) => aiInterviewerVerificationCard(x), false);
+  appendAiCleanSection(box, "학생이 직접 확인할 내용", "AI가 자료만으로 확정할 수 없는 부분입니다.", data.needStudentVerification, (x) => aiVerificationCard(x), true);
+
+  if (!inventory.length) {
+    // 이전 형식 AI 결과와의 호환
+    appendAiCleanSection(box, "핵심 기록", "이전 형식 결과입니다.", data.coreRecords, (x) => aiFactCleanCard(x, "coreRecords"), false);
+    appendAiCleanSection(box, "예상 꼬리질문", "실제로 답할 수 있는 질문 문장으로 연습하세요.", data.followUpQuestions, (x) => aiFollowUpGroupCard(x), false);
+  }
+  box.appendChild(el(`<div class="notice small">AI가 활동을 많이 찾아도 모든 질문을 외울 필요는 없습니다. 전체 목록은 누락 점검용이고, 실제 연습은 A급 질문 → 핵심활동 심화 → B급 순서로 진행하세요.</div>`));
+}
 function renderAiUnparsedResult(box, raw) {
   box.appendChild(el(`<div class="notice"><strong>AI 결과 형식을 자동으로 구분하지 못했습니다.</strong><br>분석 내용이 틀렸다는 뜻은 아닙니다. AI에게 “마지막에 요청한 JSON 형식으로 다시 출력해줘”라고 요청하면 결과를 항목별로 정리할 수 있습니다.</div>`));
   const details = el(`<details class="optional-panel"><summary>붙여넣은 AI 원문 보기</summary><div class="optional-panel-body"><pre class="preview-box">${escapeHtml(raw || "(내용 없음)")}</pre></div></details>`);

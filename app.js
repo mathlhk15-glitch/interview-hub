@@ -28,6 +28,8 @@ const AppState = {
   mockEvaluation: { checks: {}, good: "", fix: "" }, // 모의면접 자가평가 저장값
   aiResultSections: null, // 마지막 AI 결과 파싱본 전체(핵심기록/핵심활동/설명필요/확인필요 등)
   aiVerificationNotes: [], // AI가 "학생이 직접 확인해야 할 내용"으로 표시한 것 중 채택된 항목
+  analysisResult: null,    // 자동 면접 분석 결과(핵심기록/질문/설명필요 등)
+  analysisUpdatedAt: null, // 마지막 자동분석 시각
 };
 
 function saveLocalSetting(key, value) {
@@ -133,36 +135,20 @@ function renderRoute() {
 
 // ── 학생 진행 흐름(STEP) 정의 — 대시보드와 이전/다음 내비게이션이 함께 씁니다 ──
 const FLOW_STEPS = [
-  { key: "universities",  route: "universities",  num: 1,  label: "면접정보 등록" },
-  { key: "type-helper",   route: "type-helper",   num: 2,  label: "면접유형 판별" },
-  { key: "roadmap",       route: "roadmap",       num: 3,  label: "D-Day 로드맵" },
-  { key: "record",        route: "record-map",    num: 4,  label: "학생부/활동 정리" },
-  { key: "activities",    route: "activities",    num: 5,  label: "핵심활동 TOP3" },
-  { key: "questions",     route: "questions",     num: 6,  label: "예상질문 만들기" },
-  { key: "weakness",      route: "weakness",      num: 7,  label: "설명이 필요한 기록" },
-  { key: "motivation",    route: "motivation",    num: 8,  label: "지원동기·학과이해" },
-  { key: "ai-coach",      route: "ai-coach",      num: 9,  label: "AI 면접 코치" },
-  { key: "trainer",       route: "trainer",       num: 10, label: "30·60초 말하기 훈련" },
-  { key: "mock-eval",     route: "mock-eval",     num: 11, label: "모의면접 자가평가" },
-  { key: "blind-check",   route: "blind-check",   num: 12, label: "블라인드 점검" },
-  { key: "print-sheet",   route: "print-sheet",   num: 13, label: "면접 직전 한 장" },
+  { key: "start",       route: "student-dashboard", num: 1, label: "자료 넣기" },
+  { key: "results",     route: "analysis-results", num: 2, label: "자동 분석 결과" },
+  { key: "questions",   route: "questions",        num: 3, label: "핵심 예상질문" },
+  { key: "trainer",     route: "trainer",          num: 4, label: "말하기 연습" },
+  { key: "print-sheet", route: "print-sheet",      num: 5, label: "면접 직전 한 장" },
 ];
 
 function flowStepStatus(key) {
   switch (key) {
-    case "universities": return AppState.universities.length > 0;
-    case "type-helper": return !!effectiveInterviewType(getActiveUniversity());
-    case "roadmap": return AppState.universities.some((u) => u.interviewDate);
-    case "record": return AppState.records.length > 0;
-    case "activities": return AppState.activities.length > 0;
+    case "start": return AppState.records.length > 0;
+    case "results": return !!AppState.analysisResult;
     case "questions": return AppState.questions.length > 0;
-    case "weakness": return (AppState.weaknessEntries || []).length > 0;
-    case "motivation": return !!AppState.motiveOneLine;
-    case "ai-coach": return !!AppState.aiResultRaw;
-    case "trainer": return false; // 진행 여부를 자동 판정하기 어려운 활동형 단계
-    case "mock-eval": return !!(AppState.mockEvaluation && (AppState.mockEvaluation.good || AppState.mockEvaluation.fix));
-    case "blind-check": return false;
-    case "print-sheet": return !!AppState.introKeywords;
+    case "trainer": return false;
+    case "print-sheet": return !!(AppState.introKeywords || AppState.questions.length);
     default: return false;
   }
 }
@@ -171,8 +157,13 @@ function flowStepStatus(key) {
 // 화면이라면 어디서나 이 함수를 호출해 하단에 붙이세요(고아 화면 방지).
 function buildFlowNav(currentKey) {
   const idx = FLOW_STEPS.findIndex((s) => s.key === currentKey);
+  if (idx < 0) {
+    const nav = el(`<div class="flow-nav"><button class="btn-ghost small">학생 홈</button></div>`);
+    nav.querySelector("button").onclick = () => navigate("student-dashboard");
+    return nav;
+  }
   const prev = idx > 0 ? FLOW_STEPS[idx - 1] : null;
-  const next = idx >= 0 && idx < FLOW_STEPS.length - 1 ? FLOW_STEPS[idx + 1] : null;
+  const next = idx < FLOW_STEPS.length - 1 ? FLOW_STEPS[idx + 1] : null;
   const nav = el(`<div class="flow-nav">
     <button class="btn-ghost small" ${prev ? "" : "disabled"}>◀ 이전</button>
     <button class="btn-ghost small">학생 홈</button>

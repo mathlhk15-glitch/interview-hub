@@ -23,20 +23,20 @@ function screenShell(title, subtitle, bodyEl, opts) {
 // ── 홈 ──────────────────────────────────────────────────────────────
 registerRoute("home", () => {
   const body = el(`<div class="menu-grid">
-    <button class="menu-card" onclick="navigate('student-dashboard')">
+    <button class="menu-card primary-menu" onclick="navigate('student-dashboard')">
       <span class="menu-emoji" aria-hidden="true">🎯</span>
-      <span class="menu-title">① 학생 면접 준비</span>
-      <span class="menu-desc">내 면접 정보부터 말하기 훈련까지</span>
+      <span class="menu-title">학생 면접 준비</span>
+      <span class="menu-desc">생활기록부 PDF 하나로 핵심 기록과 예상 면접문항까지</span>
     </button>
     <button class="menu-card" onclick="navigate('parent-mode')">
       <span class="menu-emoji" aria-hidden="true">🏠</span>
-      <span class="menu-title">② 학부모 면접 가이드</span>
-      <span class="menu-desc">가정에서 무엇을, 어떻게 도울지</span>
+      <span class="menu-title">학부모 면접 가이드</span>
+      <span class="menu-desc">가정에서 도울 일과 하지 말아야 할 일</span>
     </button>
     <button class="menu-card" onclick="navigate('interview-log')">
       <span class="menu-emoji" aria-hidden="true">📝</span>
-      <span class="menu-title">③ 면접 후기 기록</span>
-      <span class="menu-desc">받은 질문과 경험을 남기기</span>
+      <span class="menu-title">면접 후기 기록</span>
+      <span class="menu-desc">실제 받은 질문을 간단히 남기기</span>
     </button>
   </div>
   <div class="home-footer">
@@ -44,74 +44,102 @@ registerRoute("home", () => {
     <button class="btn-ghost small" onclick="navigate('crisis-card')">위기 대응 카드</button>
     <button class="btn-ghost small" id="theme-toggle-btn" onclick="toggleTheme()">🌙 어둡게</button>
   </div>`);
-  return screenShell(window.APP_CONFIG.APP_NAME, "학생부는 선택사항입니다. 없어도 모든 핵심 기능을 쓸 수 있습니다.", body, { noBack: true });
+  return screenShell(window.APP_CONFIG.APP_NAME,
+    "복잡한 체크 없이 자료를 넣으면 면접에서 확인할 핵심 기록과 질문을 자동으로 정리합니다.",
+    body, { noBack: true });
 });
 
-// ── 학생 대시보드 (모든 STEP의 허브 — 여기서 못 찾는 화면이 없어야 합니다) ──
+// ── 학생 빠른 시작 — 기본 사용자는 여기서 체크박스를 만지지 않습니다 ─────
 registerRoute("student-dashboard", () => {
   const body = el(`<div class="stack"></div>`);
-  if (!AppState.records.length) {
-    body.appendChild(el(`<div class="notice">생활기록부 업로드는 <strong>선택사항</strong>입니다. 대학 정보를 먼저 등록했더라도 아래 두 방법 중 언제든 선택할 수 있습니다.</div>`));
-    body.appendChild(el(`<button class="btn-primary" onclick="navigate('record-import')">방법 A · 생활기록부 PDF 불러오기</button>`));
-    body.appendChild(el(`<button class="btn-secondary" onclick="startWithoutRecord()">방법 B · 생활기록부 없이 시작하기</button>`));
-    if (!AppState.universities.length) body.appendChild(el(`<button class="btn-ghost" onclick="navigate('universities')">대학 정보부터 먼저 등록할래요</button>`));
-    body.appendChild(el(`<hr class="divider">`));
-  }
-  if (AppState.universities.length) {
-    const active = getActiveUniversity();
-    const selector = el(`<label class="field active-uni-selector"><span>현재 준비 대학</span><select id="dashboard-active-uni">${AppState.universities.map((u) => `<option value="${u.id}" ${active && active.id===u.id?"selected":""}>${escapeHtml(u.name || "(대학명 미입력)")} · ${escapeHtml(u.major || "")}</option>`).join("")}</select></label>`);
-    selector.querySelector("select").onchange = (e) => { setActiveUniversity(e.target.value); toast("현재 준비 대학을 변경했습니다."); renderRoute(); };
-    body.appendChild(selector);
-  }
-  const list = el(`<div class="step-list"></div>`);
-  FLOW_STEPS.forEach((s) => {
-    const done = flowStepStatus(s.key);
-    const row = el(`<button class="step-row ${done ? "done" : ""}">
-      <span class="step-num">${s.num}</span>
-      <span class="step-label">${escapeHtml(s.label)}</span>
-      ${done ? '<span class="step-check">완료 ✓</span>' : ""}
-    </button>`);
-    row.onclick = () => navigate(s.route);
-    list.appendChild(row);
-  });
-  body.appendChild(list);
-  body.appendChild(el(`<hr class="divider">`));
-  body.appendChild(el(`<p class="label">참고 자료 (언제든 열람 가능)</p>`));
-  body.appendChild(el(`<div class="row-gap">
-    <button class="btn-ghost small" onclick="navigate('common12')">빈출 12유형</button>
-    <button class="btn-ghost small" onclick="navigate('special-track')">특수면접·제시문 모드</button>
-    <button class="btn-ghost small" onclick="navigate('crisis-card')">위기 대응 카드</button>
+  body.appendChild(el(`<div class="hero-card">
+    <div class="hero-kicker">가장 쉬운 시작</div>
+    <h2>생활기록부 PDF를 넣으면 바로 면접문항을 만듭니다</h2>
+    <p>세특·진로·동아리·자율활동에서 면접 가능성이 높은 기록을 자동으로 선별하고, 반드시 준비할 질문과 꼬리질문으로 정리합니다.</p>
+    <button class="btn-primary big" id="quick-pdf-btn">생활기록부 PDF로 바로 시작</button>
+    <button class="btn-secondary" id="quick-no-record-btn">생활기록부 없이 시작</button>
   </div>`));
-  return screenShell("학생 면접 준비", "단계를 순서대로 밟거나, 원하는 단계로 바로 이동하세요.", body, { noBack: true });
+  body.querySelector("#quick-pdf-btn").onclick = () => navigate("record-import");
+  body.querySelector("#quick-no-record-btn").onclick = () => navigate("no-record-input");
+
+  if (AppState.analysisResult) {
+    body.appendChild(el(`<button class="btn-primary" onclick="navigate('analysis-results')">최근 자동 분석 결과 다시 보기</button>`));
+  }
+
+  // 대학/학과는 정확도를 조금 높이는 선택 입력입니다. 처음부터 복잡한 배점표를 요구하지 않습니다.
+  const active = getActiveUniversity();
+  const opt = el(`<details class="optional-panel" ${active ? "open" : ""}>
+    <summary>지원 대학·학과 입력 <span class="muted small">(선택)</span></summary>
+    <div class="stack optional-panel-body">
+      <p class="muted small">대학·학과를 입력하면 지원동기·전공 연결 질문을 조금 더 맞춤화합니다. 몰라도 건너뛰어도 됩니다.</p>
+      <div class="grid-2">
+        <label class="field"><span>대학명</span><input id="quick-uni-name" value="${escapeHtml(active?.name || "")}" placeholder="예: ○○대학교"></label>
+        <label class="field"><span>학과명</span><input id="quick-uni-major" value="${escapeHtml(active?.major || "")}" placeholder="예: 미디어커뮤니케이션학과"></label>
+      </div>
+      <label class="field"><span>전형명</span><input id="quick-uni-track" value="${escapeHtml(active?.track || "")}" placeholder="알고 있으면 입력"></label>
+      <button class="btn-secondary" id="save-quick-uni">저장</button>
+      <button class="btn-ghost small" onclick="navigate('universities')">면접시간·평가요소 등 상세정보 입력</button>
+    </div>
+  </details>`);
+  opt.querySelector("#save-quick-uni").onclick = () => {
+    const name = opt.querySelector("#quick-uni-name").value.trim();
+    const major = opt.querySelector("#quick-uni-major").value.trim();
+    const track = opt.querySelector("#quick-uni-track").value.trim();
+    let uni = getActiveUniversity();
+    if (!uni) {
+      uni = { id: uid("uni"), name, major, track, interviewDate:"", checkInTime:"", location:"", duration:"", prepTime:"", interviewerCount:"", ratio:"", stageType:"일괄합산", evalWeights:"", blind:"미확인", promptBased:"미확인", docBased:"미확인", memoAllowed:"미확인", officialChecked:false, schoolViolenceNote:"", typeGuess:"", typeGuessOverride:"", specialTrack:"none", memo:"", sourceLog:[] };
+      AppState.universities.push(uni); AppState.activeUniversityId = uni.id;
+    } else { uni.name = name; uni.major = major; uni.track = track; }
+    if (AppState.records.length) runAutomaticInterviewAnalysis();
+    toast("지원 정보를 저장했습니다.");
+  };
+  body.appendChild(opt);
+
+  const advanced = el(`<details class="optional-panel">
+    <summary>상세 준비 도구 <span class="muted small">(필요할 때만)</span></summary>
+    <div class="tool-grid optional-panel-body">
+      <button class="btn-ghost small" onclick="navigate('record-map')">분석 결과 직접 수정</button>
+      <button class="btn-ghost small" onclick="navigate('type-helper')">면접유형 확인</button>
+      <button class="btn-ghost small" onclick="navigate('roadmap')">D-Day 로드맵</button>
+      <button class="btn-ghost small" onclick="navigate('ai-coach')">AI 심화분석</button>
+      <button class="btn-ghost small" onclick="navigate('blind-check')">블라인드 점검</button>
+      <button class="btn-ghost small" onclick="navigate('common12')">빈출 12유형</button>
+    </div>
+  </details>`);
+  body.appendChild(advanced);
+  body.appendChild(buildFlowNav("start"));
+  return screenShell("학생 면접 준비", "학생은 자료를 넣고 질문에 답하는 데 집중하면 됩니다.", body, { noBack: true });
 });
 
-function startWithoutRecord() {
-  navigate("no-record-input");
-}
+function startWithoutRecord() { navigate("no-record-input"); }
 
 registerRoute("no-record-input", () => {
-  const prompts = window.APP_DATA.noRecordPrompts;
-  const body = el(`<div class="stack" id="no-record-form"></div>`);
-  prompts.forEach((p, i) => {
-    body.appendChild(el(`<label class="field">
-      <span>${i + 1}. ${escapeHtml(p)}</span>
-      <textarea rows="2" data-idx="${i}" placeholder="해당 사항이 없으면 비워 두어도 됩니다"></textarea>
-    </label>`));
-  });
-  const saveBtn = el(`<button class="btn-primary sticky-btn">저장하고 학생부 근거 지도로 이동</button>`);
+  const compactPrompts = [
+    "가장 의미 있었던 수업·탐구·프로젝트는 무엇이었나요?",
+    "내가 직접 맡아서 한 일이 분명한 활동은 무엇인가요?",
+    "예상대로 되지 않아 수정·보완했던 경험이 있나요?",
+    "친구들과 협력하거나 갈등을 조정했던 경험이 있나요?",
+    "진로·전공과 연결해 이야기하고 싶은 경험이 있나요?",
+  ];
+  const body = el(`<div class="stack" id="no-record-form">
+    <div class="notice small">모든 칸을 채울 필요는 없습니다. 기억나는 활동만 짧게 적어도 면접질문을 만들 수 있습니다.</div>
+  </div>`);
+  compactPrompts.forEach((p, i) => body.appendChild(el(`<label class="field"><span>${i+1}. ${escapeHtml(p)}</span><textarea rows="2" data-idx="${i}" placeholder="키워드나 짧은 문장으로 적어도 됩니다"></textarea></label>`)));
+  const saveBtn = el(`<button class="btn-primary big">입력한 내용으로 면접문항 만들기</button>`);
   saveBtn.onclick = () => {
-    const textareas = body.querySelectorAll("textarea");
-    const newRecords = [];
-    textareas.forEach((t) => {
-      const v = t.value.trim();
-      if (v) newRecords.push({ id: uid("rec"), section: "직접 입력", text: v, tags: [], tagsInitialized: false, source: "직접 입력" });
+    const values = Array.from(body.querySelectorAll("textarea")).map((t) => t.value.trim()).filter(Boolean);
+    if (!values.length) { toast("활동을 한 가지 이상 적어주세요."); return; }
+    // 이전 직접입력 기록은 유지하되 완전히 동일한 문장은 중복 추가하지 않습니다.
+    values.forEach((v) => {
+      if (!AppState.records.some((r) => r.source === "직접 입력" && r.text === v)) {
+        AppState.records.push({ id: uid("rec"), section: "직접 입력", text: v, tags: [], tagsInitialized: false, source: "직접 입력" });
+      }
     });
-    AppState.records.push(...newRecords);
-    toast(`${newRecords.length}건을 저장했습니다.`);
-    navigate("record-map");
+    runAutomaticInterviewAnalysis();
+    navigate("analysis-results");
   };
   body.appendChild(saveBtn);
-  return screenShell("생활기록부 없이 시작", "질문에 편하게 적은 만큼만 답하세요. 문장이 아니어도 됩니다.", body);
+  return screenShell("생활기록부 없이 시작", "활동 몇 가지만 적으면 자동으로 핵심 질문을 정리합니다.", body);
 });
 
 // ── STEP1 대학별 면접정보 ────────────────────────────────────────────

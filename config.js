@@ -14,4 +14,7 @@ window.APP_CONFIG = {
 
   // 앱 표시 이름
   APP_NAME: "2027 대입 면접 준비 허브",
+
+  // 배포 버전
+  APP_VERSION: "4.0-simple",
 };

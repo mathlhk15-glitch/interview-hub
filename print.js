@@ -11,6 +11,7 @@ const PRINT_LIMITS = {
   activityName: 20,
   activityNote: 40,
   lastWord: 60,
+  question: 90,
 };
 
 function truncate(str, max) {
@@ -22,6 +23,7 @@ function buildPrintSheetHtml(state) {
   const uni = getActiveUniversity();
   const activities = (state.activities || []).slice(0, 3);
   const crisis = window.APP_DATA.crisisCards.slice(0, 2);
+  const coreQuestions = (state.questions || []).filter((q) => q.priority === "A").slice(0, 5);
   const weaknessSummary = (state.weaknessEntries || []).map((w) => {
     const parts = [w.category, w.accept, w.effort, w.result].filter(Boolean);
     return parts.join(": ");
@@ -51,6 +53,10 @@ function buildPrintSheetHtml(state) {
       <ol>
         ${activities.map((a) => `<li><strong>${escapeHtml(truncate(a.name || "", PRINT_LIMITS.activityName))}</strong> — ${escapeHtml(truncate(a.summary || "", PRINT_LIMITS.activityNote))}</li>`).join("") || "<li>미입력</li>"}
       </ol>
+    </section>
+    <section class="print-section">
+      <h2>면접 직전 핵심 질문</h2>
+      <ol>${coreQuestions.map((q) => `<li>${escapeHtml(truncate(q.text || "", PRINT_LIMITS.question))}</li>`).join("") || "<li>핵심 질문 미생성</li>"}</ol>
     </section>
     <section class="print-section">
       <h2>설명이 필요한 부분</h2>

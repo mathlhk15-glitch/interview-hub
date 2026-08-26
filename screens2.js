@@ -2,87 +2,92 @@
  * screens2.js (2/2)
  */
 
-// ── STEP3 생활기록부 불러오기 ─────────────────────────────────────────
+// ── 생활기록부 빠른 분석 — PDF를 넣으면 자동으로 결과까지 이동 ─────────
 registerRoute("record-import", () => {
   const body = el(`<div class="stack">
-    <div class="notice">생활기록부 파일은 서버에 저장하지 않습니다. 브라우저 메모리 안에서만 처리됩니다.</div>
-    <label class="field file-drop" id="drop-zone">
-      <span>PDF 파일 선택 또는 이곳에 끌어다 놓기</span>
+    <div class="privacy-strip"><strong>개인정보 보호</strong><span>PDF는 서버에 저장하거나 자동 전송하지 않고, 현재 브라우저에서만 읽습니다.</span></div>
+    <label class="field file-drop quick-drop" id="drop-zone">
+      <span class="drop-icon">PDF</span>
+      <strong>생활기록부 PDF를 선택하세요</strong>
+      <span class="muted small">또는 이곳에 파일을 끌어다 놓으세요</span>
       <input type="file" accept="application/pdf" id="pdf-input">
     </label>
-    <div id="pdf-status" class="muted"></div>
-    <hr class="divider">
-    <p class="label">추출이 잘 안 되나요? 텍스트를 직접 붙여넣으세요 (NEIS 화면에서 복사)</p>
-    <p class="muted small" id="char-count"></p>
-    <textarea id="paste-text" rows="10" placeholder="여기에 생활기록부 텍스트를 붙여넣으세요"></textarea>
-    <label class="field"><span>영역을 하나로 통일해서 지정 (선택)</span>
-      <select id="force-section"><option value="">자동 추정</option>${window.APP_DATA.recordSections.map((s) => `<option>${s}</option>`).join("")}</select>
-    </label>
-    <button class="btn-primary" id="use-paste-btn">붙여넣은 텍스트로 진행 (전체 사용)</button>
-    <button class="btn-ghost" onclick="navigate('no-record-input')">생활기록부 없이 진행할게요</button>
+    <div id="pdf-status" class="analysis-status muted">파일을 넣으면 자동으로 핵심 기록과 예상질문을 생성합니다.</div>
+    <button class="btn-ghost" onclick="navigate('no-record-input')">생활기록부 없이 시작</button>
+    <details class="optional-panel">
+      <summary>PDF 추출이 잘 안 될 때 직접 붙여넣기</summary>
+      <div class="stack optional-panel-body">
+        <p class="muted small">NEIS 또는 PDF에서 복사한 텍스트를 붙여넣으면 전체 내용을 사용해 분석합니다.</p>
+        <textarea id="paste-text" rows="9" placeholder="생활기록부 텍스트를 붙여넣으세요"></textarea>
+        <p id="char-count" class="muted small"></p>
+        <button class="btn-secondary" id="use-paste-btn">붙여넣은 내용 분석하기</button>
+      </div>
+    </details>
   </div>`);
 
   const input = body.querySelector("#pdf-input");
   const status = body.querySelector("#pdf-status");
   const pasteArea = body.querySelector("#paste-text");
   const charCount = body.querySelector("#char-count");
-  const updateCharCount = () => { charCount.textContent = `현재 ${pasteArea.value.length.toLocaleString()}자 (전체를 그대로 사용합니다 — 앞부분만 잘라 쓰지 않습니다)`; };
-  pasteArea.addEventListener("input", updateCharCount);
-  updateCharCount();
+  pasteArea.oninput = () => { charCount.textContent = `${pasteArea.value.length.toLocaleString()}자`; };
 
-  input.addEventListener("change", async () => {
-    const file = input.files[0];
+  function replaceImportedRecords(drafts, rawText) {
+    const oldImportedIds = new Set(AppState.records.filter((r) => r.source === "학생부/붙여넣기").map((r) => r.id));
+    AppState.records = AppState.records.filter((r) => !oldImportedIds.has(r.id));
+    AppState.questions = AppState.questions.filter((q) => !oldImportedIds.has(q.recordId));
+    AppState.activities = AppState.activities.filter((a) => !oldImportedIds.has(a.recordId));
+    AppState.recordRawText = rawText || "";
+    AppState.records.push(...drafts);
+  }
+
+  async function analyzePdf(file) {
     if (!file) return;
-    await handlePdfFile(file);
-  });
-
-  async function handlePdfFile(file) {
-    status.textContent = "추출 중…";
+    status.innerHTML = `<div class="loading-line"><span class="spinner"></span><span>생활기록부에서 텍스트를 읽고 있습니다…</span></div>`;
     const result = await extractTextFromPdfFile(file);
     if (!result.ok) {
       status.innerHTML = `<span class="error-text">${escapeHtml(result.reason)}</span>`;
-      if (result.scanLike) pasteArea.placeholder = "이미지형/스캔 PDF로 보입니다. 여기에 직접 입력하거나 붙여넣으세요.";
+      if (result.scanLike) status.innerHTML += `<p class="muted small">스캔 PDF는 자동 OCR하지 않습니다. 아래 '직접 붙여넣기' 또는 '생활기록부 없이 시작'을 이용하세요.</p>`;
       return;
     }
-    AppState.recordRawText = result.text;
-    status.innerHTML = `<span class="ok-text">텍스트 추출 완료 (${result.pages}페이지, ${result.text.length.toLocaleString()}자 — 전체를 사용합니다).</span>`;
-    pasteArea.value = result.text; // 절대 잘라서 넣지 않습니다
-    updateCharCount();
+    status.innerHTML = `<div class="loading-line"><span class="spinner"></span><span>${result.pages}페이지를 읽었습니다. 면접 가능성이 높은 기록을 선별하고 있습니다…</span></div>`;
+    const drafts = draftRecordsFromText(result.text, null);
+    if (!drafts.length) { status.innerHTML = `<span class="error-text">분석할 기록을 찾지 못했습니다. 직접 붙여넣기를 이용해 주세요.</span>`; return; }
+    replaceImportedRecords(drafts, result.text);
+    runAutomaticInterviewAnalysis();
+    status.innerHTML = `<span class="ok-text">분석 완료. 결과 화면으로 이동합니다.</span>`;
+    setTimeout(() => navigate("analysis-results"), 250);
   }
 
-  // 드래그 앤 드롭 실제 연결 (이전 버전은 문구만 있고 동작하지 않았습니다)
+  input.onchange = () => analyzePdf(input.files && input.files[0]);
+
   const dropZone = body.querySelector("#drop-zone");
-  ["dragenter", "dragover"].forEach((evt) => dropZone.addEventListener(evt, (e) => {
-    e.preventDefault(); e.stopPropagation(); dropZone.classList.add("dragover");
-  }));
-  ["dragleave", "drop"].forEach((evt) => dropZone.addEventListener(evt, (e) => {
-    e.preventDefault(); e.stopPropagation(); dropZone.classList.remove("dragover");
-  }));
-  dropZone.addEventListener("drop", async (e) => {
-    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  ["dragenter", "dragover"].forEach((evt) => dropZone.addEventListener(evt, (e) => { e.preventDefault(); dropZone.classList.add("dragover"); }));
+  ["dragleave", "drop"].forEach((evt) => dropZone.addEventListener(evt, (e) => { e.preventDefault(); dropZone.classList.remove("dragover"); }));
+  dropZone.addEventListener("drop", (e) => {
+    const file = e.dataTransfer?.files?.[0];
     if (!file) return;
-    if (file.type !== "application/pdf") { status.innerHTML = `<span class="error-text">PDF 파일만 지원합니다.</span>`; return; }
-    await handlePdfFile(file);
+    if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name || "")) { toast("PDF 파일만 지원합니다."); return; }
+    analyzePdf(file);
   });
 
   body.querySelector("#use-paste-btn").onclick = () => {
-    const text = pasteArea.value.trim(); // 전체 값 사용 — 4000자 등으로 자르지 않음
-    if (!text) { toast("텍스트를 입력하거나 붙여넣어 주세요."); return; }
-    if (!AppState.recordRawText) AppState.recordRawText = text;
-    const forced = body.querySelector("#force-section").value || null;
-    const drafts = draftRecordsFromText(text, forced);
-    AppState.records.push(...drafts);
-    toast(`${drafts.length}개 항목을 초안으로 만들었습니다. 확인·수정하세요.`);
-    navigate("record-map");
+    const text = pasteArea.value.trim();
+    if (!text) { toast("텍스트를 붙여넣어 주세요."); return; }
+    const drafts = draftRecordsFromText(text, null);
+    if (!drafts.length) { toast("분석할 기록을 찾지 못했습니다."); return; }
+    replaceImportedRecords(drafts, text);
+    runAutomaticInterviewAnalysis();
+    navigate("analysis-results");
   };
-  body.appendChild(buildFlowNav("record"));
-  return screenShell("생활기록부 불러오기", "선택 기능입니다. 텍스트형 PDF만 자동 추출됩니다. 원문은 절대 일부만 잘라 쓰지 않습니다.", body);
+  body.appendChild(buildFlowNav("start"));
+  return screenShell("생활기록부로 바로 시작", "PDF를 넣는 것만으로 기본 면접 분석이 끝나도록 설계했습니다.", body);
 });
 
 // ── 추출 내용 확인·수정 + 다중 태그 지정 (§11, 보완: 복수 선택 허용) ──
 registerRoute("record-map", () => {
   const body = el(`<div class="stack">
-    <div class="notice small">아래 태그는 규칙 기반 추천입니다. 한 기록에 여러 태그를 동시에 체크할 수 있습니다(예: 진로+학업). 반드시 직접 확인하세요.</div>
+    <div class="notice small">이 화면은 <strong>선택 기능</strong>입니다. 기본 사용자는 자동 분석 결과만 확인하면 됩니다. 자동 분류가 어색할 때만 기록·영역·태그를 수정하세요.</div>
+    <button class="btn-primary" id="rerun-analysis-btn">수정한 내용으로 다시 자동 분석</button>
     <div id="rec-list" class="stack"></div>
     <div class="row-gap">
       <button class="btn-ghost small" id="purge-buf-btn">PDF 원문 버퍼만 삭제</button>
@@ -92,6 +97,7 @@ registerRoute("record-map", () => {
   </div>`);
   const list = body.querySelector("#rec-list");
   renderRecordList(list);
+  body.querySelector("#rerun-analysis-btn").onclick = () => { runAutomaticInterviewAnalysis(); navigate("analysis-results"); };
   body.querySelector("#purge-buf-btn").onclick = () => purgeRecordRawText();
   body.querySelector("#purge-all-btn").onclick = () => {
     if (confirm("학생부에서 가져온 원문·기록·관련 활동·질문을 모두 삭제합니다. 계속할까요?")) {
@@ -100,22 +106,18 @@ registerRoute("record-map", () => {
     }
   };
   body.appendChild(buildFlowNav("record"));
-  return screenShell("학생부 면접 근거 지도", "기록을 ◎진로·전공 / ■학업·탐구 / ▲공동체 / ✕설명필요 로 표시합니다(복수 선택 가능).", body);
+  return screenShell("상세 분석 수정", "자동 분석 결과를 교정하고 싶을 때만 사용합니다.", body);
 });
 
-function autoTagsFromText(text) {
-  const hits = [];
-  window.APP_DATA.recordTags.forEach((tagDef) => {
-    if (tagDef.keywords.some((k) => text.includes(k))) hits.push(tagDef.id);
-  });
-  return hits;
+function autoTagsFromText(text, section) {
+  return inferRecordTags({ text: text || "", section: section || "", tags: [] });
 }
 
 function renderRecordList(list) {
   list.innerHTML = "";
   if (!AppState.records.length) { list.appendChild(el(`<p class="muted">아직 기록이 없습니다. 이전 화면에서 추가하세요.</p>`)); return; }
   AppState.records.forEach((r) => {
-    if (!r.tagsInitialized) { r.tags = autoTagsFromText(r.text); r.tagsInitialized = true; }
+    if (!r.tagsInitialized) { r.tags = autoTagsFromText(r.text, r.section); r.tagsInitialized = true; }
     const card = el(`<div class="card">
       <div class="tag-checks"></div>
       <select class="section-select">
@@ -152,6 +154,114 @@ function renderRecordList(list) {
     list.appendChild(card);
   });
 }
+
+
+// ── 자동 분석 결과 — 기본 학생이 가장 오래 머무는 핵심 화면 ───────────
+function tagBadgesHtml(tags) {
+  const map = { career: "◎ 진로·전공", academic: "■ 학업·탐구", community: "▲ 공동체", explain: "✕ 설명 필요" };
+  return (tags || []).map((t) => map[t] ? `<span class="mini-tag tag-${t}">${map[t]}</span>` : "").join(" ");
+}
+
+function questionResultCard(q, compact) {
+  const evidence = q.evidenceText ? `<div class="evidence-box"><span class="label">근거 · ${escapeHtml(q.evidenceSection || "학생부")}</span><p>${escapeHtml(String(q.evidenceText).slice(0, compact ? 120 : 220))}${String(q.evidenceText).length > (compact ? 120 : 220) ? "…" : ""}</p></div>` : "";
+  const priLabel = q.priority === "A" ? "A · 반드시 준비" : q.priority === "B" ? "B · 준비 권장" : q.priority === "C" ? "C · 여유가 있으면" : "추가 질문";
+  const card = el(`<div class="card result-question ${q.priority === "A" ? "priority-a" : "priority-b"}">
+    <div class="row-between"><span class="priority-pill">${priLabel}</span><span class="muted small">${escapeHtml(q.directionLabel || "")}</span></div>
+    <h3>${escapeHtml(q.text)}</h3>
+    ${evidence}
+    <div class="row-gap">
+      <button class="btn-primary small train-btn">30·60초 연습</button>
+      <button class="btn-ghost small follow-btn">꼬리질문 3층</button>
+    </div>
+  </div>`);
+  card.querySelector(".train-btn").onclick = () => navigate("trainer", { qid: q.id });
+  card.querySelector(".follow-btn").onclick = () => navigate("followups", { qid: q.id });
+  return card;
+}
+
+registerRoute("analysis-results", () => {
+  let result = AppState.analysisResult;
+  if (!result && AppState.records.length) result = runAutomaticInterviewAnalysis();
+  if (!result) {
+    const body = el(`<div class="stack"><div class="notice">분석할 자료가 없습니다. 생활기록부 PDF를 넣거나 활동을 직접 입력해 주세요.</div><button class="btn-primary" onclick="navigate('record-import')">생활기록부 PDF 넣기</button><button class="btn-secondary" onclick="navigate('no-record-input')">직접 입력하기</button></div>`);
+    return screenShell("자동 면접 분석 결과", "자료를 넣으면 핵심 질문을 자동으로 정리합니다.", body);
+  }
+
+  const uni = getActiveUniversity();
+  const body = el(`<div class="stack">
+    <div class="analysis-hero">
+      <div><span class="hero-kicker">자동 분석 완료</span><h2>${result.universityLabel ? escapeHtml(result.universityLabel) + " 기준" : "생활기록부 기준"} 면접 준비 지도</h2></div>
+      <div class="stat-grid">
+        <div class="stat-card"><strong>${result.coreRecords.length}</strong><span>핵심 기록</span></div>
+        <div class="stat-card"><strong>${result.mandatoryQuestions.length}</strong><span>필수 질문</span></div>
+        <div class="stat-card"><strong>${result.recommendedQuestions.length}</strong><span>권장 질문</span></div>
+        <div class="stat-card"><strong>${result.explainRecords.length}</strong><span>설명 필요</span></div>
+      </div>
+      <p class="muted small">이 결과는 학생부 문장·영역·활동 키워드를 바탕으로 선별한 규칙 기반 분석입니다. 실제 면접 질문을 보장하지 않으며, 대학 공식 면접 안내가 있으면 그 내용을 우선합니다.</p>
+    </div>
+
+    ${!uni ? `<div class="notice small"><strong>실제 지원 대학이 정해졌다면</strong> 대학·학과만 입력해도 전공 연결 질문을 더 맞춤화할 수 있습니다. <button class="inline-link-btn" onclick="navigate('student-dashboard')">선택 입력하기</button></div>` : (!effectiveInterviewType(uni) ? `<div class="notice small"><strong>${escapeHtml(uni.name || "지원 대학")} 면접 전 확인:</strong> 학생부 질문은 이미 생성했습니다. 실제 면접 전에는 모집요강·입학처에서 면접유형과 평가요소를 확인하세요. <button class="inline-link-btn" onclick="navigate('type-helper')">면접유형 확인하기</button></div>` : ``)}
+
+    <section class="result-section">
+      <div class="section-head"><div><span class="section-no">1</span><h2>면접에서 가장 먼저 준비할 활동</h2></div><button class="btn-ghost small" onclick="navigate('activities')">활동카드 자세히 쓰기</button></div>
+      <div id="core-activity-results" class="stack"></div>
+    </section>
+
+    <section class="result-section">
+      <div class="section-head"><div><span class="section-no">2</span><h2>반드시 준비할 질문</h2></div><span class="badge">A</span></div>
+      <p class="muted small">먼저 아래 질문부터 실제로 소리 내어 답해 보세요. 답을 외우기보다 근거가 된 경험을 자기 말로 설명하는 것이 중요합니다.</p>
+      <div id="mandatory-results" class="stack"></div>
+      <button class="btn-secondary" onclick="navigate('questions')">전체 예상질문 보기</button>
+    </section>
+
+    <section class="result-section" id="explain-section">
+      <div class="section-head"><div><span class="section-no">3</span><h2>설명을 준비해 둘 기록</h2></div></div>
+      <div id="explain-results" class="stack"></div>
+    </section>
+
+    <details class="optional-panel">
+      <summary>더 정교하게 준비하고 싶다면 <span class="muted small">(선택)</span></summary>
+      <div class="tool-grid optional-panel-body">
+        <button class="btn-ghost small" onclick="navigate('ai-coach')">AI 심화분석 프롬프트</button>
+        <button class="btn-ghost small" onclick="navigate('record-map')">자동 분석 결과 직접 수정</button>
+        <button class="btn-ghost small" onclick="navigate('universities')">대학 면접정보 상세 입력</button>
+        <button class="btn-ghost small" onclick="navigate('blind-check')">블라인드 점검</button>
+      </div>
+    </details>
+  </div>`);
+
+  const actBox = body.querySelector("#core-activity-results");
+  if (!result.coreRecords.length) actBox.appendChild(el(`<p class="muted">핵심 활동을 선별하지 못했습니다.</p>`));
+  result.coreRecords.slice(0, 3).forEach((item, idx) => {
+    const ev = shortEvidenceLabel(item.record);
+    actBox.appendChild(el(`<div class="card core-record-card">
+      <div class="row-between"><span class="rank-badge">TOP ${idx + 1}</span><div>${tagBadgesHtml(item.tags)}</div></div>
+      <strong>${escapeHtml(ev.section)}</strong>
+      <p>${escapeHtml(ev.snippet)}</p>
+      <p class="muted small">선정 근거: ${escapeHtml(item.reasons.join(" · ") || "활동의 구체성과 면접 활용도")}</p>
+    </div>`));
+  });
+
+  const qBox = body.querySelector("#mandatory-results");
+  const showQs = result.mandatoryQuestions.slice(0, 8);
+  showQs.forEach((q) => qBox.appendChild(questionResultCard(q, true)));
+  if (!showQs.length) qBox.appendChild(el(`<p class="muted">필수 질문을 만들지 못했습니다.</p>`));
+
+  const explainBox = body.querySelector("#explain-results");
+  if (!result.explainRecords.length) {
+    body.querySelector("#explain-section").classList.add("soft-section");
+    explainBox.appendChild(el(`<p class="muted">자동 분석에서 별도로 설명을 준비해야 할 기록은 두드러지지 않았습니다. 실제 출결·성적·진로변경 등은 본인이 다시 확인하세요.</p>`));
+  } else {
+    result.explainRecords.forEach((item) => {
+      const ev = shortEvidenceLabel(item.record);
+      explainBox.appendChild(el(`<div class="card warn"><strong>${escapeHtml(ev.section)}</strong><p>${escapeHtml(ev.snippet)}</p><p class="muted small">면접에서는 사실을 숨기기보다 원인 → 바꾼 노력 → 현재 변화 순으로 준비하세요.</p></div>`));
+    });
+    explainBox.appendChild(el(`<button class="btn-ghost small" onclick="navigate('weakness')">설명 4단계로 정리하기</button>`));
+  }
+
+  body.appendChild(buildFlowNav("results"));
+  return screenShell("자동 면접 분석 결과", "학생은 체크보다 질문에 답하는 데 시간을 쓰도록 구성했습니다.", body);
+});
 
 // ── STEP7 핵심활동 TOP3 (§16, 보완: "내가 직접 한 일" 필드 추가) ───────
 registerRoute("activities", () => {
@@ -205,40 +315,45 @@ registerRoute("activities", () => {
   return screenShell("핵심 활동 TOP 3", "빈칸으로 남은 자리가 곧 면접에서 질문이 들어올 자리입니다. '내가 직접 한 일'을 가장 자세히 쓰세요.", body);
 });
 
-// ── STEP5/6 질문 생성 + 우선순위 (§13,§17, 보완: 실제 태그 반영) ──────
+// ── 핵심 예상질문 — 자동생성 결과를 우선순위별로 바로 보여줍니다 ─────────
 registerRoute("questions", () => {
+  if (!AppState.questions.length && AppState.records.length) runAutomaticInterviewAnalysis();
   const body = el(`<div class="stack">
-    <div class="notice small">질문 문장은 학생부에 없는 사실을 전제로 넣지 않습니다. 근거는 각 질문 아래에 함께 표시됩니다.</div>
-    <div id="q-source-list" class="stack"></div>
+    <div class="notice small">질문은 학생부의 실제 기록을 근거로 자동 선별했습니다. A부터 먼저 연습하고, B는 여유가 있을 때 준비하세요.</div>
+    <div class="tab-bar">
+      <button class="btn-primary small" data-filter="A">A · 반드시 준비</button>
+      <button class="btn-ghost small" data-filter="B">B · 준비 권장</button>
+      <button class="btn-ghost small" data-filter="ALL">전체</button>
+    </div>
+    <div id="q-list" class="stack"></div>
+    <details class="optional-panel"><summary>기록별 6방향 질문을 더 만들기 <span class="muted small">(선택)</span></summary><div id="extra-q-sources" class="stack optional-panel-body"></div></details>
   </div>`);
-  const box = body.querySelector("#q-source-list");
-  const sourceRecords = AppState.records.filter((r) => r.text);
-  if (!sourceRecords.length) box.appendChild(el(`<p class="muted">기록이 없습니다. 활동 카드를 먼저 채우거나 학생부 근거를 등록하세요.</p>`));
-  sourceRecords.forEach((r) => {
-    const header = el(`<div class="card">
-      <p class="record-evidence">근거: "${escapeHtml(r.text.slice(0, 80))}" <span class="muted">(${escapeHtml(r.section)})</span></p>
-      <button class="btn-secondary small gen-btn">${AppState.questions.some((q) => q.recordId === r.id) ? "질문 다시 보기" : "6방향 질문 만들기"}</button>
-      <div class="q-cards stack"></div>
-    </div>`);
-    const qCardsBox = header.querySelector(".q-cards");
-    function renderQCards() {
-      qCardsBox.innerHTML = "";
-      AppState.questions.filter((q) => q.recordId === r.id).forEach((q) => qCardsBox.appendChild(buildQuestionCard(q)));
-    }
-    header.querySelector(".gen-btn").onclick = () => {
-      if (!AppState.questions.some((q) => q.recordId === r.id)) {
-        AppState.questions.push(...generateSixDirectionQuestions(r));
-      }
-      renderQCards();
-    };
-    renderQCards();
-    box.appendChild(header);
-  });
-  if (AppState.questions.length) {
-    box.appendChild(el(`<div class="notice">잊지 마세요: 이 준비 데이터는 자동 저장되지 않습니다. <button class="btn-ghost small" onclick="navigate('data-io')" style="display:inline;width:auto">지금 백업하기</button></div>`));
+  const list = body.querySelector("#q-list");
+  let filter = "A";
+  function renderList() {
+    list.innerHTML = "";
+    const pool = AppState.questions.filter((q) => filter === "ALL" || q.priority === filter);
+    if (!pool.length) list.appendChild(el(`<p class="muted">해당 우선순위의 질문이 없습니다.</p>`));
+    pool.forEach((q) => list.appendChild(questionResultCard(q, false)));
+    body.querySelectorAll("[data-filter]").forEach((b) => {
+      b.className = b.dataset.filter === filter ? "btn-primary small" : "btn-ghost small";
+    });
   }
+  body.querySelectorAll("[data-filter]").forEach((b) => b.onclick = () => { filter = b.dataset.filter; renderList(); });
+  renderList();
+
+  const extra = body.querySelector("#extra-q-sources");
+  AppState.records.filter((r) => r.text && !isLikelyLowValueRecord(r)).slice(0, 20).forEach((r) => {
+    const row = el(`<div class="card"><p class="muted small">${escapeHtml(r.section)}</p><p>${escapeHtml(String(r.text).slice(0, 110))}${String(r.text).length>110?"…":""}</p><button class="btn-ghost small">6방향 질문 추가</button></div>`);
+    row.querySelector("button").onclick = () => {
+      const existing = new Set(AppState.questions.filter((q) => q.recordId === r.id).map((q) => q.direction));
+      generateSixDirectionQuestions(r).filter((q) => !existing.has(q.direction)).forEach((q) => { q.priority = "B"; AppState.questions.push(q); });
+      toast("추가 질문을 B 목록에 넣었습니다."); filter = "B"; renderList();
+    };
+    extra.appendChild(row);
+  });
   body.appendChild(buildFlowNav("questions"));
-  return screenShell("기록 하나에서 6방향 질문", "동기·과정·개념·역할·한계·연결.", body);
+  return screenShell("핵심 예상질문", "많이 만드는 것보다, 중요한 질문을 깊게 준비하는 데 초점을 둡니다.", body);
 });
 
 function buildQuestionCard(q) {
@@ -630,9 +745,9 @@ const AI_ADOPT_HANDLERS = {
 };
 
 // ── STEP9 30초·60초 훈련 (STAR/OREO, iOS 대응 녹음, 정직한 반복 카운터) ─
-registerRoute("trainer", () => {
+registerRoute("trainer", (params) => {
   const pool = AppState.questions.length ? AppState.questions : [{ text: "질문을 먼저 만들어주세요.", directionLabel: "" }];
-  let current = pool[Math.floor(Math.random() * pool.length)];
+  let current = (params && params.qid && pool.find((q) => q.id === params.qid)) || pool[Math.floor(Math.random() * pool.length)];
   let frame = "star";
   const attemptsByQuestion = new Map();
   const questionKey = () => current.id || current.text;

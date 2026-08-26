@@ -90,13 +90,31 @@ function guessSectionForLine(line) {
 // 인자로 받은 text는 절대 앱 내부에서 잘라서 넘기지 않습니다 — 호출부에서 항상
 // 화면에 보이는 textarea의 "전체" 값(=AppState.recordRawText와 동일)을 넘겨야 합니다.
 function draftRecordsFromText(text, forcedSection) {
-  const lines = text.split(/\n+/).map((l) => l.trim()).filter((l) => l.length >= 6);
-  return lines.map((line) => ({
-    id: uid("rec"),
-    section: forcedSection || guessSectionForLine(line) || "미지정 (직접 선택 필요)",
-    text: line,
-    tags: [], // ◎ ■ ▲ ✕ 여러 개를 동시에 지정할 수 있습니다 (학생이 record-map에서 확인)
-    tagsInitialized: false,
-    source: "학생부/붙여넣기",
-  }));
+  const rawLines = text.split(/\n+/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const records = [];
+  let currentSection = forcedSection || null;
+  const headingMap = [
+    ["세부능력 및 특기사항", /세부능력\s*및\s*특기사항|세특/],
+    ["진로활동", /진로활동/],
+    ["동아리", /동아리활동|동아리/],
+    ["자율·자치", /자율활동|자치활동|자율·자치/],
+    ["봉사", /봉사활동|봉사/],
+    ["행동특성 및 종합의견", /행동특성\s*및\s*종합의견|행동특성/],
+    ["교과성적", /교과학습발달상황|교과성적/],
+    ["출결", /출결상황|출결/],
+  ];
+  for (const line of rawLines) {
+    if (line.length < 6 && !/(결석|지각|조퇴|미인정|하락|변경|미이수|중단)/.test(line)) continue;
+    let headingSection = null;
+    for (const [section, re] of headingMap) { if (re.test(line)) { headingSection = section; break; } }
+    // 순수 제목처럼 보이면 다음 줄의 맥락만 바꾸고 기록으로는 넣지 않습니다.
+    if (headingSection && line.length <= 28) { currentSection = headingSection; continue; }
+    const guessed = forcedSection || guessSectionForLine(line) || currentSection || "미지정 (자동 분석)";
+    if (headingSection) currentSection = headingSection;
+    if (/학교생활세부사항기록부|학교생활기록부II|학교생활기록부Ⅱ|출력일자|페이지\s*\d*/i.test(line)) continue;
+    records.push({
+      id: uid("rec"), section: guessed, text: line, tags: [], tagsInitialized: false, source: "학생부/붙여넣기",
+    });
+  }
+  return records;
 }

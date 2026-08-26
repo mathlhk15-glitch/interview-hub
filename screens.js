@@ -66,6 +66,17 @@ registerRoute("student-dashboard", () => {
     body.appendChild(el(`<button class="btn-primary" onclick="navigate('analysis-results')">최근 자동 분석 결과 다시 보기</button>`));
   }
 
+  body.appendChild(el(`<section class="ai-highlight-card" aria-label="선택형 AI 심화분석">
+    <div class="ai-highlight-icon" aria-hidden="true">✨</div>
+    <div class="ai-highlight-copy">
+      <span class="ai-highlight-kicker">선택 기능 · 무료</span>
+      <h3>AI로 더 정교하게 분석하기</h3>
+      <p>기본 예상문항은 이 사이트가 바로 만듭니다. 더 깊은 분석이 필요할 때만 프롬프트를 복사해 ChatGPT·Claude·Gemini 등에 붙여넣으세요.</p>
+      <div class="ai-meta-row"><span>API 없음</span><span>자동 전송 없음</span><span>원하는 AI 사용</span></div>
+    </div>
+    <button class="btn-ai-strong" onclick="navigate('ai-coach')">AI 심화분석 시작</button>
+  </section>`));
+
   // 대학/학과는 정확도를 조금 높이는 선택 입력입니다. 처음부터 복잡한 배점표를 요구하지 않습니다.
   const active = getActiveUniversity();
   const opt = el(`<details class="optional-panel" ${active ? "open" : ""}>
@@ -101,7 +112,7 @@ registerRoute("student-dashboard", () => {
       <button class="btn-ghost small" onclick="navigate('record-map')">분석 결과 직접 수정</button>
       <button class="btn-ghost small" onclick="navigate('type-helper')">면접유형 확인</button>
       <button class="btn-ghost small" onclick="navigate('roadmap')">D-Day 로드맵</button>
-      <button class="btn-ghost small" onclick="navigate('ai-coach')">AI 심화분석</button>
+      <button class="btn-ghost small" onclick="navigate('ai-coach')">AI 심화분석 다시 열기</button>
       <button class="btn-ghost small" onclick="navigate('blind-check')">블라인드 점검</button>
       <button class="btn-ghost small" onclick="navigate('common12')">빈출 12유형</button>
     </div>

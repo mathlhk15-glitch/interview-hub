@@ -219,10 +219,20 @@ registerRoute("analysis-results", () => {
       <div id="explain-results" class="stack"></div>
     </section>
 
+    <section class="ai-highlight-card result-ai-highlight" aria-label="선택형 AI 심화분석">
+      <div class="ai-highlight-icon" aria-hidden="true">✨</div>
+      <div class="ai-highlight-copy">
+        <span class="ai-highlight-kicker">선택 기능 · 무료</span>
+        <h3>AI로 더 정교하게 분석하기</h3>
+        <p>현재 자동 분석 결과를 바탕으로 더 깊은 질문·꼬리질문을 받고 싶다면 사용하세요. 학생부가 자동 전송되지는 않으며, 복사할 내용을 먼저 확인합니다.</p>
+        <div class="ai-meta-row"><span>API 없음</span><span>ChatGPT</span><span>Claude</span><span>Gemini</span></div>
+      </div>
+      <button class="btn-ai-strong" onclick="navigate('ai-coach')">AI 심화분석 프롬프트 만들기</button>
+    </section>
+
     <details class="optional-panel">
-      <summary>더 정교하게 준비하고 싶다면 <span class="muted small">(선택)</span></summary>
+      <summary>기타 상세 도구 <span class="muted small">(선택)</span></summary>
       <div class="tool-grid optional-panel-body">
-        <button class="btn-ghost small" onclick="navigate('ai-coach')">AI 심화분석 프롬프트</button>
         <button class="btn-ghost small" onclick="navigate('record-map')">자동 분석 결과 직접 수정</button>
         <button class="btn-ghost small" onclick="navigate('universities')">대학 면접정보 상세 입력</button>
         <button class="btn-ghost small" onclick="navigate('blind-check')">블라인드 점검</button>

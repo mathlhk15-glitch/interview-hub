@@ -66,16 +66,32 @@ registerRoute("student-dashboard", () => {
     body.appendChild(el(`<button class="btn-primary" onclick="navigate('analysis-results')">최근 자동 분석 결과 다시 보기</button>`));
   }
 
-  body.appendChild(el(`<section class="ai-highlight-card" aria-label="선택형 AI 심화분석">
-    <div class="ai-highlight-icon" aria-hidden="true">✨</div>
-    <div class="ai-highlight-copy">
-      <span class="ai-highlight-kicker">선택 기능 · 무료</span>
-      <h3>AI로 더 정교하게 분석하기</h3>
-      <p>기본 예상문항은 이 사이트가 바로 만듭니다. 더 깊은 분석이 필요할 때만 프롬프트를 복사해 ChatGPT·Claude·Gemini 등에 붙여넣으세요.</p>
-      <div class="ai-meta-row"><span>API 없음</span><span>자동 전송 없음</span><span>원하는 AI 사용</span></div>
-    </div>
-    <button class="btn-ai-strong" onclick="navigate('ai-coach')">AI 심화분석 시작</button>
-  </section>`));
+  const hasRecordAi = hasImportedStudentRecord();
+  const hasActivityAi = hasDirectActivityRecords();
+  if (hasRecordAi) {
+    body.appendChild(el(`<section class="ai-highlight-card" aria-label="생활기록부 기반 AI 심화분석">
+      <div class="ai-highlight-icon" aria-hidden="true">✨</div>
+      <div class="ai-highlight-copy">
+        <span class="ai-highlight-kicker">선택 기능 · 무료</span>
+        <h3>생활기록부 기반 AI 심화분석</h3>
+        <p>이미 불러온 생활기록부 기록만 골라 더 깊은 예상질문·꼬리질문을 받습니다. 전송할 내용은 복사 전에 직접 확인합니다.</p>
+        <div class="ai-meta-row"><span>API 없음</span><span>자동 전송 없음</span><span>ChatGPT · Claude · Gemini</span></div>
+      </div>
+      <button class="btn-ai-strong" onclick="navigateAiMode('record')">생기부 기반 AI 분석</button>
+    </section>`));
+  }
+  if (hasActivityAi) {
+    body.appendChild(el(`<section class="ai-highlight-card" aria-label="내 활동 기반 AI 심화분석">
+      <div class="ai-highlight-icon" aria-hidden="true">✨</div>
+      <div class="ai-highlight-copy">
+        <span class="ai-highlight-kicker">생활기록부 없이도 가능 · 무료</span>
+        <h3>내 활동으로 AI 심화분석</h3>
+        <p>직접 입력한 수업·탐구·협력·진로 경험만 이용해 예상질문과 꼬리질문을 더 정교하게 만듭니다.</p>
+        <div class="ai-meta-row"><span>API 없음</span><span>자동 전송 없음</span><span>원하는 AI 사용</span></div>
+      </div>
+      <button class="btn-ai-strong" onclick="navigateAiMode('activity')">내 활동 AI 분석</button>
+    </section>`));
+  }
 
   // 대학/학과는 정확도를 조금 높이는 선택 입력입니다. 처음부터 복잡한 배점표를 요구하지 않습니다.
   const active = getActiveUniversity();
@@ -112,7 +128,7 @@ registerRoute("student-dashboard", () => {
       <button class="btn-ghost small" onclick="navigate('record-map')">분석 결과 직접 수정</button>
       <button class="btn-ghost small" onclick="navigate('type-helper')">면접유형 확인</button>
       <button class="btn-ghost small" onclick="navigate('roadmap')">D-Day 로드맵</button>
-      <button class="btn-ghost small" onclick="navigate('ai-coach')">AI 심화분석 다시 열기</button>
+      <button class="btn-ghost small" onclick="navigate('ai-coach')">AI 도구 전체 보기</button>
       <button class="btn-ghost small" onclick="navigate('blind-check')">블라인드 점검</button>
       <button class="btn-ghost small" onclick="navigate('common12')">빈출 12유형</button>
     </div>

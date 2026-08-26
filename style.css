@@ -315,3 +315,27 @@ body.printing-active #print-mount { display: block; }
   .ai-highlight-icon { width:38px; height:38px; }
   .btn-ai-strong { grid-column:1; }
 }
+
+/* v4.3 — AI 결과는 먼저 읽고, 저장 시에만 사실 확인 */
+.ai-result-hero {
+  border:1px solid #c8d9ff; background:linear-gradient(180deg,#f7f9ff 0%,var(--surface) 100%);
+  border-radius:18px; padding:18px; display:flex; flex-direction:column; gap:14px;
+}
+[data-theme="dark"] .ai-result-hero { background:linear-gradient(180deg,#171d2b 0%,var(--surface) 100%); border-color:#34405f; }
+.ai-result-hero h2 { margin:0; font-size:1.28rem; line-height:1.4; }
+.ai-result-stats .stat-card strong { color:#5367b2; }
+.ai-result-section { display:flex; flex-direction:column; gap:10px; margin-top:4px; }
+.ai-section-subtitle { margin:-2px 0 2px; line-height:1.5; }
+.ai-clean-card { border-color:#d9ddea; }
+.ai-clean-card h3 { margin:8px 0 10px; font-size:1rem; line-height:1.5; }
+.ai-clean-text { margin:10px 0 8px; white-space:pre-wrap; line-height:1.6; }
+.ai-action-row { margin-top:10px; }
+.ai-check-card { background:#fffaf2; }
+[data-theme="dark"] .ai-check-card { background:#251f15; }
+.ai-next-action { border-left:4px solid var(--primary); background:#f5faf8; }
+[data-theme="dark"] .ai-next-action { background:#16201e; }
+@media (max-width:420px) {
+  .ai-clean-card .row-between { align-items:flex-start; gap:8px; }
+  .ai-clean-card .ai-action-row { flex-direction:column; }
+  .ai-clean-card .ai-action-row button { width:100%; }
+}

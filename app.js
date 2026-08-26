@@ -80,6 +80,16 @@ function fmtDday(n) {
   return `D+${Math.abs(n)} (지난 일정)`;
 }
 
+function hasImportedStudentRecord() {
+  return AppState.records.some((r) => r.source === "학생부/붙여넣기");
+}
+function hasDirectActivityRecords() {
+  return AppState.records.some((r) => r.source === "직접 입력");
+}
+function navigateAiMode(mode) {
+  navigate("ai-coach", { mode });
+}
+
 // ── 개인정보 후보 탐지 (경고용, 자동 확정 아님) ───────────────────────
 function findPiiCandidates(text) {
   const hits = new Set();

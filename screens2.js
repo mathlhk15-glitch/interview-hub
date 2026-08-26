@@ -219,16 +219,7 @@ registerRoute("analysis-results", () => {
       <div id="explain-results" class="stack"></div>
     </section>
 
-    <section class="ai-highlight-card result-ai-highlight" aria-label="선택형 AI 심화분석">
-      <div class="ai-highlight-icon" aria-hidden="true">✨</div>
-      <div class="ai-highlight-copy">
-        <span class="ai-highlight-kicker">선택 기능 · 무료</span>
-        <h3>AI로 더 정교하게 분석하기</h3>
-        <p>현재 자동 분석 결과를 바탕으로 더 깊은 질문·꼬리질문을 받고 싶다면 사용하세요. 학생부가 자동 전송되지는 않으며, 복사할 내용을 먼저 확인합니다.</p>
-        <div class="ai-meta-row"><span>API 없음</span><span>ChatGPT</span><span>Claude</span><span>Gemini</span></div>
-      </div>
-      <button class="btn-ai-strong" onclick="navigate('ai-coach')">AI 심화분석 프롬프트 만들기</button>
-    </section>
+    <div id="analysis-ai-entry"></div>
 
     <details class="optional-panel">
       <summary>기타 상세 도구 <span class="muted small">(선택)</span></summary>
@@ -239,6 +230,32 @@ registerRoute("analysis-results", () => {
       </div>
     </details>
   </div>`);
+
+  const aiEntry = body.querySelector("#analysis-ai-entry");
+  if (hasImportedStudentRecord()) {
+    aiEntry.appendChild(el(`<section class="ai-highlight-card result-ai-highlight" aria-label="생활기록부 기반 AI 심화분석">
+      <div class="ai-highlight-icon" aria-hidden="true">✨</div>
+      <div class="ai-highlight-copy">
+        <span class="ai-highlight-kicker">선택 기능 · 무료</span>
+        <h3>생활기록부 기반 AI 심화분석</h3>
+        <p>방금 분석한 생활기록부 기록을 바탕으로 더 깊은 질문과 꼬리질문을 받습니다. 생기부 전체가 자동 전송되지는 않습니다.</p>
+        <div class="ai-meta-row"><span>API 없음</span><span>전송 범위 직접 선택</span><span>ChatGPT · Claude · Gemini</span></div>
+      </div>
+      <button class="btn-ai-strong" onclick="navigateAiMode('record')">생기부 기반 AI 분석</button>
+    </section>`));
+  }
+  if (hasDirectActivityRecords()) {
+    aiEntry.appendChild(el(`<section class="ai-highlight-card result-ai-highlight" aria-label="내 활동 기반 AI 심화분석">
+      <div class="ai-highlight-icon" aria-hidden="true">✨</div>
+      <div class="ai-highlight-copy">
+        <span class="ai-highlight-kicker">생활기록부 없이도 가능 · 무료</span>
+        <h3>내 활동으로 AI 심화분석</h3>
+        <p>직접 입력한 활동만 골라 AI에 보낼 프롬프트를 만듭니다. 생활기록부와는 별개의 분석 경로입니다.</p>
+        <div class="ai-meta-row"><span>API 없음</span><span>직접 입력 활동만 사용</span><span>원하는 AI 사용</span></div>
+      </div>
+      <button class="btn-ai-strong" onclick="navigateAiMode('activity')">내 활동 AI 분석</button>
+    </section>`));
+  }
 
   const actBox = body.querySelector("#core-activity-results");
   if (!result.coreRecords.length) actBox.appendChild(el(`<p class="muted">핵심 활동을 선별하지 못했습니다.</p>`));
@@ -488,24 +505,47 @@ registerRoute("motivation", () => {
 });
 
 // ── AI 면접 코치 (§18~26, 보완: 단일기록 실선택 + feedback도 동일 안전절차 + 전체 필드 노출) ──
-registerRoute("ai-coach", () => {
+registerRoute("ai-coach", (params) => {
+  const requested = params && params.mode ? params.mode : "";
+  const validModes = ["record", "activity", "single", "feedback"];
+  const directMode = validModes.includes(requested) ? requested : "";
+  const titles = {
+    record: ["생활기록부 기반 AI 심화분석", "불러온 생활기록부 중 필요한 기록만 골라 더 깊은 예상질문과 꼬리질문을 만듭니다."],
+    activity: ["내 활동으로 AI 심화분석", "생활기록부 없이 직접 입력한 경험만 이용해 더 정교한 면접질문을 만듭니다."],
+    single: ["선택 기록 AI 집중분석", "기록 하나만 골라 개인정보 전송 범위를 최소화하면서 깊게 분석합니다."],
+    feedback: ["내 답변 AI 피드백", "내가 작성한 답변을 AI가 대신 고쳐 쓰지 않고, 잘된 점·보완점·꼬리질문만 점검합니다."],
+  };
   const body = el(`<div class="stack">
     <div class="notice">AI API를 쓰지 않습니다. 프롬프트를 만들어 복사한 뒤, 평소 쓰는 AI에 붙여넣고 결과를 다시 이 화면에 붙여넣습니다.</div>
-    <div class="menu-grid three">
-      <button class="menu-card small" data-mode="full"><span class="menu-title">① 전체 분석</span></button>
-      <button class="menu-card small" data-mode="single"><span class="menu-title">② 선택 기록 집중분석</span></button>
-      <button class="menu-card small" data-mode="feedback"><span class="menu-title">③ 내 답변 피드백</span></button>
+    <div class="menu-grid three" id="ai-mode-menu">
+      <button class="menu-card small" data-mode="record"><span class="menu-title">생활기록부 기반 AI 심화분석</span><span class="menu-desc">불러온 생기부 기록만 사용</span></button>
+      <button class="menu-card small" data-mode="activity"><span class="menu-title">내 활동으로 AI 심화분석</span><span class="menu-desc">직접 입력한 활동만 사용</span></button>
+      <button class="menu-card small" data-mode="feedback"><span class="menu-title">내 답변 AI 피드백</span><span class="menu-desc">답변의 잘된 점·보완점·꼬리질문</span></button>
+      <button class="menu-card small" data-mode="single"><span class="menu-title">기록 하나만 집중분석</span><span class="menu-desc">전송 범위를 최소화한 고급 기능</span></button>
     </div>
     <div id="ai-wizard"></div>
   </div>`);
-  body.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => renderAiWizard(body.querySelector("#ai-wizard"), b.dataset.mode));
+  const mount = body.querySelector("#ai-wizard");
+  const menu = body.querySelector("#ai-mode-menu");
+  body.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => {
+    renderAiWizard(mount, b.dataset.mode);
+    menu.querySelectorAll("[data-mode]").forEach((x) => x.classList.toggle("selected", x === b));
+  });
+  if (directMode) {
+    menu.style.display = "none";
+    renderAiWizard(mount, directMode);
+    const switchBtn = el(`<button class="btn-ghost small">다른 AI 도구 보기</button>`);
+    switchBtn.onclick = () => { menu.style.display = "grid"; switchBtn.remove(); };
+    body.insertBefore(switchBtn, mount);
+  }
   body.appendChild(buildFlowNav("ai-coach"));
-  return screenShell("AI 면접 코치 활용하기", "학생 답을 AI가 대신 만드는 것이 아니라, AI가 더 좋은 질문을 던지게 합니다.", body);
+  const copy = titles[directMode] || ["AI 면접 코치 활용하기", "학생 답을 AI가 대신 만드는 것이 아니라, AI가 더 좋은 질문을 던지게 합니다."];
+  return screenShell(copy[0], copy[1], body);
 });
 
 function renderAiWizard(mount, mode) {
   mount.innerHTML = "";
-  const state = { step: 1, selectedSectionKeys: {}, selectedRecordId: null, redactedText: "", answerDraft: "" };
+  const state = { step: 1, selectedSectionKeys: {}, selectedRecordId: null, selectedRecordIds: {}, redactedText: "", answerDraft: "" };
   const wizard = el(`<div class="card wizard"></div>`);
   mount.appendChild(wizard);
 
@@ -517,9 +557,14 @@ function renderAiWizard(mount, mode) {
     else if (state.step === 4) renderGenerateStep();
   }
 
-  function bySectionMap() {
+  function recordsForMode() {
+    if (mode === "record") return AppState.records.filter((r) => r.source === "학생부/붙여넣기");
+    if (mode === "activity") return AppState.records.filter((r) => r.source === "직접 입력");
+    return AppState.records;
+  }
+  function bySectionMap(records) {
     const bySection = {};
-    AppState.records.forEach((r) => { (bySection[r.section] = bySection[r.section] || []).push(r); });
+    (records || recordsForMode()).forEach((r) => { (bySection[r.section] = bySection[r.section] || []).push(r); });
     return bySection;
   }
 
@@ -554,19 +599,37 @@ function renderAiWizard(mount, mode) {
       wizard.appendChild(next);
       return;
     }
-    // mode === "full"
-    wizard.appendChild(el(`<h3>단계 1 · AI에 보낼 내용 선택</h3>`));
-    const bySection = bySectionMap();
+    const records = recordsForMode();
+    const sourceLabel = mode === "record" ? "생활기록부 기록" : mode === "activity" ? "직접 입력한 활동" : "학생 자료";
+    wizard.appendChild(el(`<h3>단계 1 · AI에 보낼 ${sourceLabel} 선택</h3>`));
+    if (mode === "activity") {
+      if (!records.length) wizard.appendChild(el(`<div class="notice small">직접 입력한 활동이 없습니다. 먼저 [생활기록부 없이 시작]에서 활동을 입력하세요.</div>`));
+      records.forEach((r) => {
+        const row = el(`<label class="field checkbox"><input type="checkbox" data-record-id="${r.id}" checked> <span>[${escapeHtml(r.section)}] ${escapeHtml(r.text.slice(0, 110))}</span></label>`);
+        wizard.appendChild(row);
+      });
+      const next = el(`<button class="btn-primary" ${records.length ? "" : "disabled"}>다음</button>`);
+      next.onclick = () => {
+        state.selectedRecordIds = {};
+        wizard.querySelectorAll("[data-record-id]").forEach((cb) => { state.selectedRecordIds[cb.dataset.recordId] = cb.checked; });
+        if (!Object.values(state.selectedRecordIds).some(Boolean)) { toast("활동을 하나 이상 선택하세요."); return; }
+        state.step = 2; renderStep();
+      };
+      wizard.appendChild(next);
+      return;
+    }
+    const bySection = bySectionMap(records);
     Object.keys(bySection).forEach((section) => {
       const checked = !SENSITIVE_BY_DEFAULT_OFF.includes(section);
       const row = el(`<label class="field checkbox"><input type="checkbox" data-section="${escapeHtml(section)}" ${checked?"checked":""}> ${escapeHtml(section)} (${bySection[section].length}건)${SENSITIVE_BY_DEFAULT_OFF.includes(section)?' <span class="muted small">— 민감도가 높아 기본 해제</span>':''}</label>`);
       wizard.appendChild(row);
     });
-    if (!Object.keys(bySection).length) wizard.appendChild(el(`<p class="muted">선택할 기록이 없습니다. 활동을 먼저 등록하세요.</p>`));
-    const next = el(`<button class="btn-primary">다음</button>`);
+    if (!Object.keys(bySection).length) wizard.appendChild(el(`<div class="notice small">${mode === "record" ? "불러온 생활기록부 기록이 없습니다. 먼저 생활기록부 PDF를 넣어주세요." : "선택할 기록이 없습니다."}</div>`));
+    const next = el(`<button class="btn-primary" ${Object.keys(bySection).length ? "" : "disabled"}>다음</button>`);
     next.onclick = () => {
       state.selectedSectionKeys = {};
       wizard.querySelectorAll("[data-section]").forEach((cb) => { state.selectedSectionKeys[cb.dataset.section] = cb.checked; });
+      if (!Object.values(state.selectedSectionKeys).some(Boolean)) { toast("보낼 영역을 하나 이상 선택하세요."); return; }
       state.step = 2; renderStep();
     };
     wizard.appendChild(next);
@@ -578,10 +641,13 @@ function renderAiWizard(mount, mode) {
       const r = AppState.records.find((x) => x.id === state.selectedRecordId);
       return r ? `[${r.section}]\n- ${r.text}` : "";
     }
-    const bySection = bySectionMap();
+    if (mode === "activity") {
+      return recordsForMode().filter((r) => state.selectedRecordIds[r.id]).map((r) => `[${r.section}]\n- ${r.text}`).join("\n\n");
+    }
+    const bySection = bySectionMap(recordsForMode());
     let text = "";
     Object.keys(state.selectedSectionKeys).forEach((section) => {
-      if (state.selectedSectionKeys[section]) {
+      if (state.selectedSectionKeys[section] && bySection[section]) {
         text += `[${section}]\n` + bySection[section].map((r) => "- " + r.text).join("\n") + "\n\n";
       }
     });
@@ -635,7 +701,7 @@ function renderAiWizard(mount, mode) {
     </ol>`));
     const resultTa = el(`<textarea id="ai-result-ta" rows="8" placeholder="AI 분석 결과 붙여넣기"></textarea>`);
     wizard.appendChild(resultTa);
-    const importBtn = el(`<button class="btn-secondary">AI 분석 결과 가져오기</button>`);
+    const importBtn = el(`<button class="btn-secondary">AI 결과 붙여넣고 정리하기</button>`);
     const resultBox = el(`<div id="ai-result-box" class="stack"></div>`);
     importBtn.onclick = () => {
       AppState.aiResultRaw = resultTa.value;
@@ -652,19 +718,12 @@ function renderAiWizard(mount, mode) {
         return;
       }
       const parsed = tryParseAiJson(resultTa.value);
-      let sections;
       if (parsed.ok) {
-        toast("JSON 형식으로 정상 인식했습니다. 모든 항목을 아래에 보여줍니다.");
-        sections = buildAiSections(parsed.data);
-        if (!sections.length) resultBox.appendChild(el(`<p class="muted">JSON은 인식했지만 채울 항목이 없습니다.</p>`));
+        toast("AI 심화분석 결과를 정리했습니다.");
+        renderAiAnalysisResult(resultBox, parsed.data);
       } else {
-        resultBox.appendChild(el(`<div class="notice small">자동으로 결과를 구분하지 못했습니다. 아래 카드를 직접 편집한 뒤에만 채택할 수 있습니다.</div>`));
-        sections = [buildFallbackSection(resultTa.value)];
+        renderAiUnparsedResult(resultBox, resultTa.value);
       }
-      sections.forEach((sec) => {
-        resultBox.appendChild(el(`<p class="label">${escapeHtml(sec.label)}</p>`));
-        sec.cards.forEach((c) => resultBox.appendChild(buildAiResultCard(c, sec.key, sec.requireEditBeforeAdopt, sec.requireFactVerification)));
-      });
     };
     wizard.appendChild(importBtn);
     wizard.appendChild(resultBox);
@@ -672,6 +731,160 @@ function renderAiWizard(mount, mode) {
   }
 
   renderStep();
+}
+
+
+function countAiArray(data, key) {
+  return Array.isArray(data && data[key]) ? data[key].length : 0;
+}
+
+function aiDisplayText(value) {
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  if (typeof value === "object") {
+    const preferred = ["question", "text", "record", "activity", "content", "title", "reason"];
+    for (const k of preferred) if (typeof value[k] === "string" && value[k].trim()) return value[k].trim();
+    return JSON.stringify(value, null, 2);
+  }
+  return String(value);
+}
+
+function findOrCreateAiQuestion(text, priority) {
+  const clean = String(text || "").trim();
+  if (!clean) return null;
+  let q = AppState.questions.find((x) => x.source === "AI 제안" && String(x.text || "").trim() === clean);
+  if (!q) q = pushAiQuestion(clean, priority);
+  else if (priority && !q.priority) q.priority = priority;
+  return q;
+}
+
+function aiQuestionCleanCard(text, priority, label) {
+  const clean = aiDisplayText(text);
+  const card = el(`<div class="card ai-clean-card ai-question-card">
+    <div class="row-between"><span class="priority-pill">${escapeHtml(label)}</span><span class="badge source-ai">AI 제안</span></div>
+    <h3>${escapeHtml(clean)}</h3>
+    <div class="row-gap ai-action-row">
+      <button class="btn-primary small practice-btn">30·60초 연습</button>
+      <button class="btn-ghost small save-btn">질문 저장</button>
+    </div>
+  </div>`);
+  const saveBtn = card.querySelector(".save-btn");
+  const syncSaved = () => {
+    const exists = AppState.questions.some((x) => x.source === "AI 제안" && String(x.text || "").trim() === clean.trim());
+    if (exists) { saveBtn.textContent = "저장됨"; saveBtn.disabled = true; }
+  };
+  saveBtn.onclick = () => { findOrCreateAiQuestion(clean, priority); syncSaved(); toast("질문을 저장했습니다."); };
+  card.querySelector(".practice-btn").onclick = () => {
+    const q = findOrCreateAiQuestion(clean, priority);
+    if (q) navigate("trainer", { qid: q.id });
+  };
+  syncSaved();
+  return card;
+}
+
+function aiFactCleanCard(text, kind) {
+  const clean = aiDisplayText(text);
+  const labels = {
+    coreRecords: { badge: "핵심 기록", button: "내 기록으로 저장", confirm: "이 내용이 실제 생활기록부 또는 본인의 실제 경험과 일치합니까? 확인한 경우에만 저장해 주세요." },
+    coreActivities: { badge: "핵심 활동 후보", button: "핵심 활동으로 저장", confirm: "이 활동이 실제 생활기록부 또는 본인의 실제 경험과 일치합니까? 확인한 경우에만 저장해 주세요." },
+    needsExplanation: { badge: "설명 필요", button: "설명 준비에 추가", confirm: "이 내용이 실제 생활기록부 또는 본인의 실제 상황과 일치합니까? 확인한 경우에만 추가해 주세요." },
+  };
+  const meta = labels[kind] || labels.coreRecords;
+  const card = el(`<div class="card ai-clean-card">
+    <div class="row-between"><span class="mini-tag">${escapeHtml(meta.badge)}</span><span class="badge source-ai">AI 제안</span></div>
+    <p class="ai-clean-text">${escapeHtml(clean)}</p>
+    <div class="row-gap ai-action-row"><button class="btn-ghost small adopt-btn">${escapeHtml(meta.button)}</button></div>
+  </div>`);
+  const btn = card.querySelector(".adopt-btn");
+  btn.onclick = () => {
+    if (kind === "coreActivities" && AppState.activities.length >= 3) {
+      toast("핵심활동은 최대 3개입니다. 기존 활동을 정리한 뒤 다시 시도하세요.");
+      return;
+    }
+    if (!confirm(meta.confirm)) return;
+    const handler = AI_ADOPT_HANDLERS[kind];
+    if (handler) handler(clean, null);
+    btn.textContent = "저장됨";
+    btn.disabled = true;
+    toast("확인한 내용을 저장했습니다.");
+  };
+  return card;
+}
+
+function aiVerificationCard(text) {
+  const clean = aiDisplayText(text);
+  return el(`<div class="card ai-clean-card ai-check-card">
+    <div class="row-between"><span class="mini-tag tag-explain">직접 확인</span><span class="badge source-ai">AI 제안</span></div>
+    <p class="ai-clean-text">${escapeHtml(clean)}</p>
+    <p class="muted small">학생부 원문, 실제 활동 내용 또는 대학 공식자료에서 직접 확인하세요.</p>
+  </div>`);
+}
+
+function appendAiCleanSection(box, title, subtitle, items, renderer, collapsed) {
+  if (!Array.isArray(items) || !items.length) return;
+  const section = el(`<section class="ai-result-section ${collapsed ? "is-collapsible" : ""}"></section>`);
+  if (collapsed) {
+    const details = el(`<details class="optional-panel"><summary>${escapeHtml(title)} <span class="muted small">${items.length}개</span></summary><div class="optional-panel-body stack"></div></details>`);
+    if (subtitle) details.querySelector(".optional-panel-body").appendChild(el(`<p class="muted small">${escapeHtml(subtitle)}</p>`));
+    items.forEach((item) => details.querySelector(".optional-panel-body").appendChild(renderer(item)));
+    section.appendChild(details);
+  } else {
+    section.appendChild(el(`<div class="section-head"><div><h2>${escapeHtml(title)}</h2></div><span class="rank-badge">${items.length}개</span></div>`));
+    if (subtitle) section.appendChild(el(`<p class="muted small ai-section-subtitle">${escapeHtml(subtitle)}</p>`));
+    const list = el(`<div class="stack"></div>`);
+    items.forEach((item) => list.appendChild(renderer(item)));
+    section.appendChild(list);
+  }
+  box.appendChild(section);
+}
+
+function renderAiAnalysisResult(box, data) {
+  const counts = {
+    coreActivities: countAiArray(data, "coreActivities"),
+    priorityA: countAiArray(data, "priorityA"),
+    priorityB: countAiArray(data, "priorityB"),
+    needsExplanation: countAiArray(data, "needsExplanation"),
+  };
+  const hero = el(`<div class="ai-result-hero">
+    <div><span class="hero-kicker">AI 심화분석 완료</span><h2>면접 준비에 필요한 결과만 정리했습니다</h2></div>
+    <div class="stat-grid ai-result-stats">
+      <div class="stat-card"><strong>${counts.coreActivities}</strong><span>핵심 활동</span></div>
+      <div class="stat-card"><strong>${counts.priorityA}</strong><span>필수 질문</span></div>
+      <div class="stat-card"><strong>${counts.priorityB}</strong><span>권장 질문</span></div>
+      <div class="stat-card"><strong>${counts.needsExplanation}</strong><span>설명 필요</span></div>
+    </div>
+    <p class="muted small">먼저 결과를 읽고 질문 연습을 시작하세요. AI가 제안한 사실성 내용은 저장할 때만 실제 학생부·경험과 일치하는지 확인합니다.</p>
+  </div>`);
+  box.appendChild(hero);
+  if (counts.priorityA > 0) {
+    const firstA = aiDisplayText(data.priorityA[0]);
+    const startBtn = el(`<button class="btn-primary big ai-start-practice">A급 필수 질문부터 연습하기</button>`);
+    startBtn.onclick = () => {
+      const q = findOrCreateAiQuestion(firstA, "A");
+      if (q) navigate("trainer", { qid: q.id });
+    };
+    box.appendChild(startBtn);
+  }
+
+  appendAiCleanSection(box, "핵심 활동 후보 TOP 3", "면접에서 깊게 설명하기 좋은 활동 후보입니다. 실제 경험과 일치하는 활동만 저장하세요.", data.coreActivities, (x) => aiFactCleanCard(x, "coreActivities"), false);
+  appendAiCleanSection(box, "핵심 기록", "면접관이 확인하거나 꼬리질문으로 확장할 가능성이 있는 기록입니다.", data.coreRecords, (x) => aiFactCleanCard(x, "coreRecords"), false);
+  appendAiCleanSection(box, "A · 반드시 준비할 질문", "가장 먼저 30초·60초로 말해보세요.", data.priorityA, (x) => aiQuestionCleanCard(x, "A", "A · 반드시 준비"), false);
+  appendAiCleanSection(box, "B · 준비 권장 질문", "A 질문을 준비한 뒤 이어서 연습하세요.", data.priorityB, (x) => aiQuestionCleanCard(x, "B", "B · 준비 권장"), false);
+  appendAiCleanSection(box, "설명이 필요한 부분", "성적 변화·진로 변화·선택과목·출결 등 실제 사실과 일치하는 경우에만 설명 준비에 추가하세요.", data.needsExplanation, (x) => aiFactCleanCard(x, "needsExplanation"), false);
+  appendAiCleanSection(box, "예상 꼬리질문", "질문을 더 깊게 이어갈 때 대비할 항목입니다.", data.followUpQuestions, (x) => aiQuestionCleanCard(x, null, "꼬리질문"), false);
+  appendAiCleanSection(box, "C · 여유가 있으면", "시간이 남을 때 확인하세요.", data.priorityC, (x) => aiQuestionCleanCard(x, "C", "C · 여유가 있으면"), true);
+  appendAiCleanSection(box, "학생이 직접 확인할 내용", "AI가 단정할 수 없는 부분입니다. 원문과 공식자료를 직접 확인하세요.", data.needStudentVerification, (x) => aiVerificationCard(x), true);
+
+  if (counts.priorityA > 0) {
+    const action = el(`<div class="card ai-next-action"><strong>A급 질문부터 바로 연습하세요.</strong><p class="muted small">각 질문의 ‘30·60초 연습’을 누르면 자동으로 질문은행에 저장되고 말하기 훈련으로 이동합니다.</p></div>`);
+    box.appendChild(action);
+  }
+}
+
+function renderAiUnparsedResult(box, raw) {
+  box.appendChild(el(`<div class="notice"><strong>AI 결과 형식을 자동으로 구분하지 못했습니다.</strong><br>분석 내용이 틀렸다는 뜻은 아닙니다. AI에게 “마지막에 요청한 JSON 형식으로 다시 출력해줘”라고 요청하면 결과를 항목별로 정리할 수 있습니다.</div>`));
+  const details = el(`<details class="optional-panel"><summary>붙여넣은 AI 원문 보기</summary><div class="optional-panel-body"><pre class="preview-box">${escapeHtml(raw || "(내용 없음)")}</pre></div></details>`);
+  box.appendChild(details);
 }
 
 function renderAiFeedbackResult(box, data) {
@@ -732,11 +945,13 @@ function buildAiResultCard(c, sectionKey, requireEditBeforeAdopt, requireFactVer
 }
 
 function pushAiQuestion(text, priority) {
-  AppState.questions.push({
+  const q = {
     id: uid("q"), recordId: null, direction: "ai", directionLabel: "AI 제안", text, hint: "",
     evidenceText: "", evidenceSection: "", source: "AI 제안", priority: priority || null,
     followUps: window.APP_DATA.followUpLayers.map((l) => ({ ...l, done: false, note: "" })),
-  });
+  };
+  AppState.questions.push(q);
+  return q;
 }
 const AI_ADOPT_HANDLERS = {
   coreRecords: (text) => { AppState.records.push({ id: uid("rec"), section: "AI 확인 기록", text, tags: autoTagsFromText(text), tagsInitialized: true, source: "AI 제안(학생 확인)" }); },
@@ -793,6 +1008,11 @@ registerRoute("trainer", (params) => {
     <audio id="playback" controls style="display:none;width:100%"></audio>
     <p class="muted small" id="attempt-count">같은 질문 시도: 0회</p>
     <div class="notice small">세 번 모두 정확히 같은 문장을 외우려 하지 마세요. 키워드는 같아도 문장은 매번 달라져도 됩니다(이 앱은 실제 발화를 텍스트로 옮기지 않으므로, 문장이 똑같은지는 자동으로 판정하지 않습니다).</div>
+    <section class="ai-highlight-card compact-ai-card" aria-label="내 답변 AI 피드백">
+      <div class="ai-highlight-icon" aria-hidden="true">✨</div>
+      <div class="ai-highlight-copy"><span class="ai-highlight-kicker">선택 기능 · 무료</span><h3>내 답변 AI 피드백</h3><p>연습한 답변을 직접 입력하면 AI가 답을 대신 써주지 않고 잘된 점 1개, 보완점 최대 2개, 꼬리질문을 제안합니다.</p></div>
+      <button class="btn-ai-strong" onclick="navigateAiMode('feedback')">내 답변 점검</button>
+    </section>
   </div>`);
 
   function renderFrame() {

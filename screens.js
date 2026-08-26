@@ -132,16 +132,14 @@ registerRoute("student-dashboard", () => {
   body.appendChild(opt);
 
   const advanced = el(`<details class="optional-panel">
-    <summary>AI 없이 쓰는 보조 도구 <span class="muted small">(선택)</span></summary>
+    <summary>추가 면접 준비 도구 <span class="muted small">(선택)</span></summary>
     <div class="optional-panel-body stack">
-      <div class="notice small">규칙 기반 자동질문은 PDF 표 구조나 줄 순서에 따라 문장이 잘릴 수 있어 <strong>주 분석 기능에서 제외했습니다.</strong> 아래 기능은 확인·보조용으로만 사용하세요.</div>
+      <div class="notice small"><strong>면접문항 생성은 AI 전체분석이 담당합니다.</strong> 아래 도구는 일정·블라인드·공통질문처럼 분석 이후에 필요한 보조 기능입니다.</div>
       <div class="tool-grid">
-        <button class="btn-ghost small" onclick="navigate('record-map')">추출 텍스트 확인·수정</button>
         <button class="btn-ghost small" onclick="navigate('type-helper')">면접유형 확인</button>
         <button class="btn-ghost small" onclick="navigate('roadmap')">D-Day 로드맵</button>
         <button class="btn-ghost small" onclick="navigate('blind-check')">블라인드 점검</button>
         <button class="btn-ghost small" onclick="navigate('common12')">빈출 12유형</button>
-        <button class="btn-ghost small" onclick="navigate('analysis-results')">로컬 간단 분석(참고)</button>
       </div>
     </div>
   </details>`);

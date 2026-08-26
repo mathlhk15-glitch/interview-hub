@@ -124,8 +124,28 @@ function currentRoute() {
   return { name: name || "home", params };
 }
 
+// v5.1: 구버전의 로컬 규칙분석 화면은 사용자 흐름에서 폐기합니다.
+// 예전 즐겨찾기/열려 있던 탭의 해시로 들어와도 AI 중심 화면으로 자동 전환합니다.
+const LEGACY_ROUTE_REDIRECTS = {
+  "analysis-results": () => AppState.aiResultSections ? "ai-results" : "student-dashboard",
+  "record-map": () => hasImportedStudentRecord() ? "ai-coach" : "student-dashboard",
+  "activities": () => AppState.aiResultSections ? "ai-results" : "student-dashboard",
+  "questions": () => AppState.aiResultSections ? "ai-results" : "student-dashboard",
+  "followups": () => AppState.aiResultSections ? "ai-results" : "student-dashboard",
+};
+
 function renderRoute() {
-  const { name, params } = currentRoute();
+  let { name, params } = currentRoute();
+  const redirect = LEGACY_ROUTE_REDIRECTS[name];
+  if (redirect) {
+    const target = typeof redirect === "function" ? redirect() : redirect;
+    if (target && target !== name) {
+      const extra = name === "record-map" && target === "ai-coach" ? "?mode=record-full" : "";
+      history.replaceState(null, "", `#/${target}${extra}`);
+      name = target;
+      params = extra ? { mode: "record-full" } : {};
+    }
+  }
   const view = document.getElementById("view");
   const fn = routes[name] || routes["home"];
   try {

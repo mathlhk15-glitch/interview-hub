@@ -16,7 +16,7 @@ window.document.dispatchEvent(new window.Event('DOMContentLoaded'));
 let failed = 0;
 function check(cond, msg){ if(!cond){ console.error('FAIL:',msg); failed++; } else console.log('PASS:',msg); }
 
-const routes = ['home','student-dashboard','record-import','no-record-input','analysis-results','questions','trainer','print-sheet','record-map','universities','type-helper','roadmap','ai-coach','ai-results','parent-mode','interview-log'];
+const routes = ['home','student-dashboard','record-import','no-record-input','trainer','print-sheet','universities','type-helper','roadmap','ai-coach','ai-results','parent-mode','interview-log'];
 for(const route of routes){
   try{ window.location.hash = '#/' + route; window.renderRoute(); check(window.document.getElementById('view').textContent.trim().length > 0, `route ${route} renders`); }
   catch(e){ console.error('ERROR route', route, e); failed++; }
@@ -41,3 +41,11 @@ check(window.document.body.textContent.includes('전체 생활기록부'), 'reco
 
 console.log(`\nSmoke test finished. failed=${failed}`);
 process.exitCode = failed ? 1 : 0;
+
+// v5.1 legacy hashes must never expose local rule-analysis screens.
+window.location.hash = '#/analysis-results'; window.renderRoute();
+check(window.currentRoute().name === 'student-dashboard' || window.currentRoute().name === 'ai-results', 'legacy analysis-results redirects');
+window.location.hash = '#/questions'; window.renderRoute();
+check(window.currentRoute().name === 'student-dashboard' || window.currentRoute().name === 'ai-results', 'legacy questions redirects');
+window.location.hash = '#/record-map'; window.renderRoute();
+check(window.currentRoute().name === 'ai-coach' || window.currentRoute().name === 'student-dashboard', 'legacy record-map redirects');

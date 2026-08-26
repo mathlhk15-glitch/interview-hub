@@ -14,6 +14,7 @@ registerRoute("record-import", () => {
     </label>
     <div id="pdf-status" class="analysis-status muted">파일을 넣으면 텍스트만 추출합니다. 면접문항 분석은 다음 단계에서 AI가 담당합니다.</div>
     <button class="btn-ghost" onclick="navigate('no-record-input')">생활기록부 없이 시작</button>
+    <div class="notice small">PDF에서 글자가 일부 어색하게 추출되어도 다음 단계의 <strong>개인정보 제거·전송 내용 확인</strong> 화면에서 AI에 보낼 원문을 직접 고칠 수 있습니다.</div>
     <details class="optional-panel">
       <summary>PDF 추출이 잘 안 될 때 직접 붙여넣기</summary>
       <div class="stack optional-panel-body">
@@ -85,7 +86,7 @@ registerRoute("record-import", () => {
 registerRoute("record-map", () => {
   const body = el(`<div class="stack">
     <div class="notice small">이 화면은 <strong>선택 기능</strong>입니다. AI 전체분석에 보낼 텍스트가 어색하게 추출됐을 때만 기록·영역·태그를 확인하세요.</div>
-    <button class="btn-primary" id="rerun-analysis-btn">수정한 내용으로 로컬 간단 분석</button>
+    <button class="btn-primary" id="rerun-analysis-btn">수정한 내용으로 AI 전체분석</button>
     <div id="rec-list" class="stack"></div>
     <div class="row-gap">
       <button class="btn-ghost small" id="purge-buf-btn">PDF 원문 버퍼만 삭제</button>
@@ -95,7 +96,11 @@ registerRoute("record-map", () => {
   </div>`);
   const list = body.querySelector("#rec-list");
   renderRecordList(list);
-  body.querySelector("#rerun-analysis-btn").onclick = () => { runAutomaticInterviewAnalysis(); navigate("analysis-results"); };
+  body.querySelector("#rerun-analysis-btn").onclick = () => {
+    AppState.recordRawText = AppState.records.filter((r) => r.source === "학생부/붙여넣기").map((r) => `[${r.section}]\n${r.text}`).join("\n\n");
+    AppState.aiResultSections = null;
+    navigateAiMode("record-full");
+  };
   body.querySelector("#purge-buf-btn").onclick = () => purgeRecordRawText();
   body.querySelector("#purge-all-btn").onclick = () => {
     if (confirm("학생부에서 가져온 원문·기록·관련 활동·질문을 모두 삭제합니다. 계속할까요?")) {
@@ -703,13 +708,13 @@ function renderAiWizard(mount, mode) {
   }
 
   function renderRedactStep() {
-    wizard.appendChild(el(`<h3>단계 2 · 개인정보 제거</h3>`));
+    wizard.appendChild(el(`<h3>단계 2 · AI에 보낼 원문 확인·개인정보 제거</h3>`));
     const raw = collectSelectedText();
     const hits = findPiiCandidates(raw);
     wizard.appendChild(el(`<p class="muted small">제거 후보 목록: ${window.APP_DATA.piiRedactionHints.join(", ")}</p>`));
     if (hits.length) wizard.appendChild(el(`<div class="notice small">자동 탐지된 후보: ${hits.map(escapeHtml).join(" / ")}</div>`));
     const ta = el(`<textarea id="redact-ta" rows="8">${escapeHtml(raw)}</textarea>`);
-    wizard.appendChild(el(`<p class="label">아래에서 이름·학교명 등을 직접 지우거나 [ ]로 바꾸세요</p>`));
+    wizard.appendChild(el(`<p class="label">PDF 추출이 어색한 부분은 여기서 바로 고치고, 이름·학교명 등 불필요한 개인정보는 지우거나 [ ]로 바꾸세요</p>`));
     wizard.appendChild(ta);
     const next = el(`<button class="btn-primary">다음 · 전송 내용 미리보기</button>`);
     next.onclick = () => { state.redactedText = ta.value; state.step = 3; renderStep(); };

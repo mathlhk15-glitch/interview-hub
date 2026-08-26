@@ -16,5 +16,5 @@ window.APP_CONFIG = {
   APP_NAME: "2027 대입 면접 준비 허브",
 
   // 배포 버전
-  APP_VERSION: "4.3-ai-result-simple",
+  APP_VERSION: "4.4-ai-report-grounded",
 };

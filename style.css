@@ -339,3 +339,48 @@ body.printing-active #print-mount { display: block; }
   .ai-clean-card .ai-action-row { flex-direction:column; }
   .ai-clean-card .ai-action-row button { width:100%; }
 }
+
+/* v4.4 — AI 결과를 학생용 면접 리포트 형태로 정리 */
+.ai-area-chip {
+  display:inline-flex; align-items:center; width:max-content; max-width:100%; margin-top:10px;
+  padding:4px 9px; border-radius:999px; background:#f1f4f8; color:var(--muted);
+  font-size:.74rem; font-weight:750; line-height:1.35;
+}
+[data-theme="dark"] .ai-area-chip { background:#20272e; }
+.ai-fact-title { margin:10px 0 4px !important; font-size:1.04rem !important; }
+.ai-evidence-box {
+  margin:12px 0 4px; padding:11px 12px; border-left:3px solid #8bb8aa;
+  background:#f5faf8; border-radius:8px; color:var(--text);
+}
+[data-theme="dark"] .ai-evidence-box { background:#16201e; border-left-color:#6ba994; }
+.ai-evidence-label { display:block; color:var(--primary); font-size:.74rem; font-weight:850; }
+.ai-evidence-box p { margin:5px 0 0; color:var(--muted); font-size:.82rem; line-height:1.55; }
+.ai-evidence-missing {
+  margin:10px 0 4px; padding:9px 11px; border:1px dashed #d6b56f; border-radius:8px;
+  background:#fffaf0; color:#795d24; font-size:.78rem; line-height:1.5;
+}
+[data-theme="dark"] .ai-evidence-missing { background:#241f15; color:#dcc68e; border-color:#806b3d; }
+.ai-evaluation-point, .ai-student-check {
+  display:flex; flex-direction:column; gap:3px; margin-top:9px; padding:9px 11px;
+  border-radius:8px; background:#f6f7fb; font-size:.8rem; line-height:1.5;
+}
+[data-theme="dark"] .ai-evaluation-point, [data-theme="dark"] .ai-student-check { background:#1b2027; }
+.ai-evaluation-point strong, .ai-student-check strong { font-size:.72rem; color:var(--muted); }
+.ai-verification-focus-card { border-left:4px solid #7a8dbd; }
+.ai-followup-group-card { border-left:4px solid var(--primary); }
+.ai-followup-list { display:flex; flex-direction:column; gap:10px; margin-top:12px; }
+.ai-followup-row {
+  display:flex; flex-direction:column; gap:9px; padding-top:10px; border-top:1px solid var(--line);
+}
+.ai-followup-row:first-child { border-top:0; padding-top:0; }
+.ai-followup-q { display:grid; grid-template-columns:26px 1fr; gap:8px; align-items:start; line-height:1.5; }
+.followup-no {
+  width:24px; height:24px; display:flex; align-items:center; justify-content:center;
+  border-radius:999px; background:#eaf4f0; color:var(--primary); font-size:.72rem; font-weight:850;
+}
+[data-theme="dark"] .followup-no { background:#1c312a; }
+@media (max-width:420px) {
+  .ai-evidence-box { padding:10px; }
+  .ai-followup-row .row-gap { flex-direction:column; }
+  .ai-followup-row .row-gap button { width:100%; }
+}

@@ -741,28 +741,52 @@ function countAiArray(data, key) {
 function aiDisplayText(value) {
   if (typeof value === "string") return value;
   if (value == null) return "";
-  if (typeof value === "object") {
-    const preferred = ["question", "text", "record", "activity", "content", "title", "reason"];
-    for (const k of preferred) if (typeof value[k] === "string" && value[k].trim()) return value[k].trim();
-    return JSON.stringify(value, null, 2);
-  }
+  if (typeof toPlainText === "function") return toPlainText(value);
   return String(value);
 }
 
-function findOrCreateAiQuestion(text, priority) {
-  const clean = String(text || "").trim();
+function aiEvidenceHtml(area, quote, missingMessage) {
+  const a = String(area || "").trim();
+  const q = String(quote || "").trim();
+  if (a || q) {
+    return `<div class="ai-evidence-box">
+      <span class="ai-evidence-label">근거 학생부${a ? ` · ${escapeHtml(a)}` : ""}</span>
+      ${q ? `<p>“${escapeHtml(q)}”</p>` : `<p class="muted">근거 영역은 있으나 원문 인용이 포함되지 않았습니다.</p>`}
+    </div>`;
+  }
+  return `<div class="ai-evidence-missing">${escapeHtml(missingMessage || "AI 결과에 근거 원문이 포함되지 않았습니다. 학생부 원문에서 확인한 뒤 연습하세요.")}</div>`;
+}
+
+function findOrCreateAiQuestion(value, priority) {
+  const data = typeof normalizeQuestion === "function" ? normalizeQuestion(value) : { question: aiDisplayText(value), evidenceArea: "", evidenceQuote: "", evaluationPoint: "" };
+  const clean = String(data.question || "").trim();
   if (!clean) return null;
   let q = AppState.questions.find((x) => x.source === "AI 제안" && String(x.text || "").trim() === clean);
-  if (!q) q = pushAiQuestion(clean, priority);
-  else if (priority && !q.priority) q.priority = priority;
+  if (!q) q = pushAiQuestion(clean, priority, {
+    evidenceText: data.evidenceQuote || "",
+    evidenceSection: data.evidenceArea || "",
+    hint: data.evaluationPoint || "",
+  });
+  else {
+    if (priority && !q.priority) q.priority = priority;
+    if (!q.evidenceText && data.evidenceQuote) q.evidenceText = data.evidenceQuote;
+    if (!q.evidenceSection && data.evidenceArea) q.evidenceSection = data.evidenceArea;
+    if (!q.hint && data.evaluationPoint) q.hint = data.evaluationPoint;
+  }
   return q;
 }
 
-function aiQuestionCleanCard(text, priority, label) {
-  const clean = aiDisplayText(text);
+function aiQuestionCleanCard(value, priority, label) {
+  const data = typeof normalizeQuestion === "function" ? normalizeQuestion(value) : { question: aiDisplayText(value), evidenceArea: "", evidenceQuote: "", evaluationPoint: "" };
+  const clean = String(data.question || "").trim();
+  if (!clean) return el(`<div class="card ai-clean-card"><p class="muted">질문 문장을 인식하지 못했습니다.</p></div>`);
+  const evidence = aiEvidenceHtml(data.evidenceArea, data.evidenceQuote);
+  const intent = data.evaluationPoint ? `<div class="ai-evaluation-point"><strong>면접관 확인 포인트</strong><span>${escapeHtml(data.evaluationPoint)}</span></div>` : "";
   const card = el(`<div class="card ai-clean-card ai-question-card">
     <div class="row-between"><span class="priority-pill">${escapeHtml(label)}</span><span class="badge source-ai">AI 제안</span></div>
     <h3>${escapeHtml(clean)}</h3>
+    ${evidence}
+    ${intent}
     <div class="row-gap ai-action-row">
       <button class="btn-primary small practice-btn">30·60초 연습</button>
       <button class="btn-ghost small save-btn">질문 저장</button>
@@ -770,29 +794,43 @@ function aiQuestionCleanCard(text, priority, label) {
   </div>`);
   const saveBtn = card.querySelector(".save-btn");
   const syncSaved = () => {
-    const exists = AppState.questions.some((x) => x.source === "AI 제안" && String(x.text || "").trim() === clean.trim());
+    const exists = AppState.questions.some((x) => x.source === "AI 제안" && String(x.text || "").trim() === clean);
     if (exists) { saveBtn.textContent = "저장됨"; saveBtn.disabled = true; }
   };
-  saveBtn.onclick = () => { findOrCreateAiQuestion(clean, priority); syncSaved(); toast("질문을 저장했습니다."); };
+  saveBtn.onclick = () => { findOrCreateAiQuestion(data, priority); syncSaved(); toast("질문을 저장했습니다."); };
   card.querySelector(".practice-btn").onclick = () => {
-    const q = findOrCreateAiQuestion(clean, priority);
+    const q = findOrCreateAiQuestion(data, priority);
     if (q) navigate("trainer", { qid: q.id });
   };
   syncSaved();
   return card;
 }
 
-function aiFactCleanCard(text, kind) {
-  const clean = aiDisplayText(text);
+function aiFactCleanCard(value, kind) {
   const labels = {
     coreRecords: { badge: "핵심 기록", button: "내 기록으로 저장", confirm: "이 내용이 실제 생활기록부 또는 본인의 실제 경험과 일치합니까? 확인한 경우에만 저장해 주세요." },
     coreActivities: { badge: "핵심 활동 후보", button: "핵심 활동으로 저장", confirm: "이 활동이 실제 생활기록부 또는 본인의 실제 경험과 일치합니까? 확인한 경우에만 저장해 주세요." },
     needsExplanation: { badge: "설명 필요", button: "설명 준비에 추가", confirm: "이 내용이 실제 생활기록부 또는 본인의 실제 상황과 일치합니까? 확인한 경우에만 추가해 주세요." },
   };
   const meta = labels[kind] || labels.coreRecords;
-  const card = el(`<div class="card ai-clean-card">
+  let data;
+  if (kind === "coreActivities") data = typeof normalizeCoreActivity === "function" ? normalizeCoreActivity(value) : { title: aiDisplayText(value), area: "", why: "", evidenceQuote: "" };
+  else if (kind === "needsExplanation") data = typeof normalizeExplanation === "function" ? normalizeExplanation(value) : { topic: aiDisplayText(value), detail: "", evidenceArea: "", evidenceQuote: "" };
+  else data = typeof normalizeCoreRecord === "function" ? normalizeCoreRecord(value) : { title: "", area: "", summary: aiDisplayText(value), evidenceQuote: "" };
+
+  const title = kind === "coreActivities" ? data.title : kind === "needsExplanation" ? data.topic : (data.title || data.summary);
+  const bodyText = kind === "coreActivities" ? data.why : kind === "needsExplanation" ? data.detail : (data.title && data.summary !== data.title ? data.summary : "");
+  const area = kind === "needsExplanation" ? data.evidenceArea : data.area;
+  const quote = data.evidenceQuote;
+  const saveText = [title, bodyText].filter(Boolean).join(" — ");
+  const areaChip = area ? `<span class="ai-area-chip">${escapeHtml(area)}</span>` : "";
+  const evidence = quote || area ? aiEvidenceHtml(area, quote, "근거 문구가 없는 AI 제안입니다. 실제 기록과 일치하는지 확인 후 저장하세요.") : "";
+  const card = el(`<div class="card ai-clean-card ai-fact-card">
     <div class="row-between"><span class="mini-tag">${escapeHtml(meta.badge)}</span><span class="badge source-ai">AI 제안</span></div>
-    <p class="ai-clean-text">${escapeHtml(clean)}</p>
+    ${areaChip}
+    ${title ? `<h3 class="ai-fact-title">${escapeHtml(title)}</h3>` : ""}
+    ${bodyText ? `<p class="ai-clean-text">${escapeHtml(bodyText)}</p>` : ""}
+    ${evidence}
     <div class="row-gap ai-action-row"><button class="btn-ghost small adopt-btn">${escapeHtml(meta.button)}</button></div>
   </div>`);
   const btn = card.querySelector(".adopt-btn");
@@ -803,7 +841,7 @@ function aiFactCleanCard(text, kind) {
     }
     if (!confirm(meta.confirm)) return;
     const handler = AI_ADOPT_HANDLERS[kind];
-    if (handler) handler(clean, null);
+    if (handler) handler(saveText || title || bodyText, null, data);
     btn.textContent = "저장됨";
     btn.disabled = true;
     toast("확인한 내용을 저장했습니다.");
@@ -811,13 +849,57 @@ function aiFactCleanCard(text, kind) {
   return card;
 }
 
-function aiVerificationCard(text) {
-  const clean = aiDisplayText(text);
+function aiInterviewerVerificationCard(value) {
+  const data = typeof normalizeVerificationPoint === "function" ? normalizeVerificationPoint(value) : { topic: aiDisplayText(value), reason: "", studentCheck: "", evidenceArea: "", evidenceQuote: "" };
+  return el(`<div class="card ai-clean-card ai-verification-focus-card">
+    <div class="row-between"><span class="mini-tag tag-academic">면접관 확인 포인트</span><span class="badge source-ai">AI 제안</span></div>
+    <h3>${escapeHtml(data.topic || "확인 가능성이 높은 부분")}</h3>
+    ${data.reason ? `<p class="ai-clean-text">${escapeHtml(data.reason)}</p>` : ""}
+    ${aiEvidenceHtml(data.evidenceArea, data.evidenceQuote, "근거 원문이 포함되지 않았습니다. 실제 기록과 대조하세요.")}
+    ${data.studentCheck ? `<div class="ai-student-check"><strong>학생이 준비할 것</strong><span>${escapeHtml(data.studentCheck)}</span></div>` : ""}
+  </div>`);
+}
+
+function aiVerificationCard(value) {
+  const data = typeof normalizeStudentVerification === "function" ? normalizeStudentVerification(value) : { item: aiDisplayText(value), reason: "", howToVerify: "" };
   return el(`<div class="card ai-clean-card ai-check-card">
     <div class="row-between"><span class="mini-tag tag-explain">직접 확인</span><span class="badge source-ai">AI 제안</span></div>
-    <p class="ai-clean-text">${escapeHtml(clean)}</p>
-    <p class="muted small">학생부 원문, 실제 활동 내용 또는 대학 공식자료에서 직접 확인하세요.</p>
+    <h3>${escapeHtml(data.item || "직접 확인할 내용")}</h3>
+    ${data.reason ? `<p class="ai-clean-text">${escapeHtml(data.reason)}</p>` : ""}
+    ${data.howToVerify ? `<div class="ai-student-check"><strong>확인 방법</strong><span>${escapeHtml(data.howToVerify)}</span></div>` : `<p class="muted small">학생부 원문, 실제 활동 내용 또는 대학 공식자료에서 직접 확인하세요.</p>`}
   </div>`);
+}
+
+function aiFollowUpGroupCard(value) {
+  const data = typeof normalizeFollowUpGroup === "function" ? normalizeFollowUpGroup(value) : { topic: "", evidenceArea: "", evidenceQuote: "", questions: [aiDisplayText(value)].filter(Boolean) };
+  const card = el(`<div class="card ai-clean-card ai-followup-group-card">
+    <div class="row-between"><span class="mini-tag tag-academic">꼬리질문 묶음</span><span class="badge source-ai">AI 제안</span></div>
+    ${data.topic ? `<h3>${escapeHtml(data.topic)}</h3>` : ""}
+    ${aiEvidenceHtml(data.evidenceArea, data.evidenceQuote, "AI 결과에 근거 원문이 포함되지 않았습니다. 학생부 원문과 대조해 주세요.")}
+    <div class="ai-followup-list"></div>
+  </div>`);
+  const list = card.querySelector(".ai-followup-list");
+  (data.questions || []).forEach((question, idx) => {
+    const qObj = { question, evidenceArea: data.evidenceArea, evidenceQuote: data.evidenceQuote, evaluationPoint: idx === 0 ? "사실·역할 확인" : idx === 1 ? "과정·판단 확인" : "근거·한계 확인" };
+    const row = el(`<div class="ai-followup-row">
+      <div class="ai-followup-q"><span class="followup-no">${idx + 1}</span><strong>${escapeHtml(question)}</strong></div>
+      <div class="row-gap"><button class="btn-primary small practice-btn">30·60초 연습</button><button class="btn-ghost small save-btn">질문 저장</button></div>
+    </div>`);
+    row.querySelector(".practice-btn").onclick = () => {
+      const q = findOrCreateAiQuestion(qObj, null);
+      if (q) navigate("trainer", { qid: q.id });
+    };
+    const saveBtn = row.querySelector(".save-btn");
+    const sync = () => {
+      const exists = AppState.questions.some((x) => x.source === "AI 제안" && String(x.text || "").trim() === String(question || "").trim());
+      if (exists) { saveBtn.textContent = "저장됨"; saveBtn.disabled = true; }
+    };
+    saveBtn.onclick = () => { findOrCreateAiQuestion(qObj, null); sync(); toast("꼬리질문을 저장했습니다."); };
+    sync();
+    list.appendChild(row);
+  });
+  if (!(data.questions || []).length) list.appendChild(el(`<p class="muted">실제 질문 문장을 인식하지 못했습니다. AI에 JSON 형식으로 다시 요청해 주세요.</p>`));
+  return card;
 }
 
 function appendAiCleanSection(box, title, subtitle, items, renderer, collapsed) {
@@ -843,7 +925,7 @@ function renderAiAnalysisResult(box, data) {
     coreActivities: countAiArray(data, "coreActivities"),
     priorityA: countAiArray(data, "priorityA"),
     priorityB: countAiArray(data, "priorityB"),
-    needsExplanation: countAiArray(data, "needsExplanation"),
+    checkPoints: countAiArray(data, "needsExplanation") + countAiArray(data, "interviewerVerificationPoints"),
   };
   const hero = el(`<div class="ai-result-hero">
     <div><span class="hero-kicker">AI 심화분석 완료</span><h2>면접 준비에 필요한 결과만 정리했습니다</h2></div>
@@ -851,13 +933,13 @@ function renderAiAnalysisResult(box, data) {
       <div class="stat-card"><strong>${counts.coreActivities}</strong><span>핵심 활동</span></div>
       <div class="stat-card"><strong>${counts.priorityA}</strong><span>필수 질문</span></div>
       <div class="stat-card"><strong>${counts.priorityB}</strong><span>권장 질문</span></div>
-      <div class="stat-card"><strong>${counts.needsExplanation}</strong><span>설명 필요</span></div>
+      <div class="stat-card"><strong>${counts.checkPoints}</strong><span>확인 포인트</span></div>
     </div>
-    <p class="muted small">먼저 결과를 읽고 질문 연습을 시작하세요. AI가 제안한 사실성 내용은 저장할 때만 실제 학생부·경험과 일치하는지 확인합니다.</p>
+    <p class="muted small">질문마다 가능한 경우 학생부 근거를 함께 표시합니다. AI가 제안한 사실성 내용은 실제 학생부·경험과 일치하는지 확인한 뒤에만 저장하세요.</p>
   </div>`);
   box.appendChild(hero);
   if (counts.priorityA > 0) {
-    const firstA = aiDisplayText(data.priorityA[0]);
+    const firstA = data.priorityA[0];
     const startBtn = el(`<button class="btn-primary big ai-start-practice">A급 필수 질문부터 연습하기</button>`);
     startBtn.onclick = () => {
       const q = findOrCreateAiQuestion(firstA, "A");
@@ -867,18 +949,19 @@ function renderAiAnalysisResult(box, data) {
   }
 
   appendAiCleanSection(box, "핵심 활동 후보 TOP 3", "면접에서 깊게 설명하기 좋은 활동 후보입니다. 실제 경험과 일치하는 활동만 저장하세요.", data.coreActivities, (x) => aiFactCleanCard(x, "coreActivities"), false);
-  appendAiCleanSection(box, "핵심 기록", "면접관이 확인하거나 꼬리질문으로 확장할 가능성이 있는 기록입니다.", data.coreRecords, (x) => aiFactCleanCard(x, "coreRecords"), false);
-  appendAiCleanSection(box, "A · 반드시 준비할 질문", "가장 먼저 30초·60초로 말해보세요.", data.priorityA, (x) => aiQuestionCleanCard(x, "A", "A · 반드시 준비"), false);
-  appendAiCleanSection(box, "B · 준비 권장 질문", "A 질문을 준비한 뒤 이어서 연습하세요.", data.priorityB, (x) => aiQuestionCleanCard(x, "B", "B · 준비 권장"), false);
-  appendAiCleanSection(box, "설명이 필요한 부분", "성적 변화·진로 변화·선택과목·출결 등 실제 사실과 일치하는 경우에만 설명 준비에 추가하세요.", data.needsExplanation, (x) => aiFactCleanCard(x, "needsExplanation"), false);
-  appendAiCleanSection(box, "예상 꼬리질문", "질문을 더 깊게 이어갈 때 대비할 항목입니다.", data.followUpQuestions, (x) => aiQuestionCleanCard(x, null, "꼬리질문"), false);
+  appendAiCleanSection(box, "핵심 기록", "면접관이 질문을 만들 때 근거가 될 수 있는 기록입니다. JSON 원문이 아니라 학생이 읽기 쉬운 형태로 표시합니다.", data.coreRecords, (x) => aiFactCleanCard(x, "coreRecords"), false);
+  appendAiCleanSection(box, "A · 반드시 준비할 질문", "가장 먼저 30초·60초로 말해보세요. 근거 학생부가 보이면 반드시 함께 확인하세요.", data.priorityA, (x) => aiQuestionCleanCard(x, "A", "A · 반드시 준비"), false);
+  appendAiCleanSection(box, "B · 준비 권장 질문", "A 질문을 준비한 뒤 개념·세부 과정까지 이어서 연습하세요.", data.priorityB, (x) => aiQuestionCleanCard(x, "B", "B · 준비 권장"), false);
+  appendAiCleanSection(box, "예상 꼬리질문", "활동명만 보여주지 않고 실제로 답할 수 있는 질문 문장으로 표시합니다.", data.followUpQuestions, (x) => aiFollowUpGroupCard(x), false);
+  appendAiCleanSection(box, "설명이 필요한 기록", "성적 변화·출결·진로 변경·선택과목처럼 학생부의 객관적 사실에 대해 설명을 준비할 항목입니다.", data.needsExplanation, (x) => aiFactCleanCard(x, "needsExplanation"), false);
+  appendAiCleanSection(box, "면접관이 확인할 가능성이 높은 부분", "활동 수준·실제 수행 범위·본인 역할·관심사의 연결성처럼 진위와 깊이를 확인할 수 있는 지점입니다.", data.interviewerVerificationPoints, (x) => aiInterviewerVerificationCard(x), false);
   appendAiCleanSection(box, "C · 여유가 있으면", "시간이 남을 때 확인하세요.", data.priorityC, (x) => aiQuestionCleanCard(x, "C", "C · 여유가 있으면"), true);
-  appendAiCleanSection(box, "학생이 직접 확인할 내용", "AI가 단정할 수 없는 부분입니다. 원문과 공식자료를 직접 확인하세요.", data.needStudentVerification, (x) => aiVerificationCard(x), true);
+  appendAiCleanSection(box, "학생이 직접 확인할 내용", "AI가 자료만으로 확정할 수 없는 부분입니다. 원문과 공식자료를 직접 확인하세요.", data.needStudentVerification, (x) => aiVerificationCard(x), true);
 
   if (counts.priorityA > 0) {
-    const action = el(`<div class="card ai-next-action"><strong>A급 질문부터 바로 연습하세요.</strong><p class="muted small">각 질문의 ‘30·60초 연습’을 누르면 자동으로 질문은행에 저장되고 말하기 훈련으로 이동합니다.</p></div>`);
-    box.appendChild(action);
+    box.appendChild(el(`<div class="card ai-next-action"><strong>A급 질문부터 바로 연습하세요.</strong><p class="muted small">질문을 누르면 근거 문구를 유지한 채 질문은행에 저장되고 말하기 훈련으로 이동합니다.</p></div>`));
   }
+  box.appendChild(el(`<div class="notice small">AI 분석 결과는 참고자료입니다. 학생부 원문과 대학 모집요강을 기준으로 최종 확인하세요. 근거가 없는 AI 제안은 사실로 단정하지 마세요.</div>`));
 }
 
 function renderAiUnparsedResult(box, raw) {
@@ -944,25 +1027,34 @@ function buildAiResultCard(c, sectionKey, requireEditBeforeAdopt, requireFactVer
   return card;
 }
 
-function pushAiQuestion(text, priority) {
+function pushAiQuestion(text, priority, meta) {
+  const m = meta || {};
   const q = {
-    id: uid("q"), recordId: null, direction: "ai", directionLabel: "AI 제안", text, hint: "",
-    evidenceText: "", evidenceSection: "", source: "AI 제안", priority: priority || null,
+    id: uid("q"), recordId: null, direction: "ai", directionLabel: "AI 제안", text, hint: m.hint || "",
+    evidenceText: m.evidenceText || "", evidenceSection: m.evidenceSection || "", source: "AI 제안", priority: priority || null,
     followUps: window.APP_DATA.followUpLayers.map((l) => ({ ...l, done: false, note: "" })),
   };
   AppState.questions.push(q);
   return q;
 }
 const AI_ADOPT_HANDLERS = {
-  coreRecords: (text) => { AppState.records.push({ id: uid("rec"), section: "AI 확인 기록", text, tags: autoTagsFromText(text), tagsInitialized: true, source: "AI 제안(학생 확인)" }); },
-  coreActivities: (text) => {
+  coreRecords: (text, priority, meta) => {
+    const m = meta || {};
+    AppState.records.push({ id: uid("rec"), section: m.area || "AI 확인 기록", text, tags: autoTagsFromText(text, m.area || ""), tagsInitialized: true, source: "AI 제안(학생 확인)" });
+  },
+  coreActivities: (text, priority, meta) => {
     if (AppState.activities.length >= 3) { toast("핵심활동은 이미 3개입니다. 기존 활동을 정리한 뒤 다시 시도하세요."); return; }
-    AppState.activities.push({ id: uid("act"), recordId: null, name: text.slice(0, 20), situation: "", role: "", action: text, process: "", result: "", limit: "", link: "", summary: text.slice(0, 40) });
+    const m = meta || {};
+    AppState.activities.push({ id: uid("act"), recordId: null, name: (m.title || text).slice(0, 28), situation: m.area || "", role: "", action: "", process: "", result: "", limit: "", link: "", summary: (m.why || text).slice(0, 80) });
   },
   priorityA: (text) => pushAiQuestion(text, "A"),
   priorityB: (text) => pushAiQuestion(text, "B"),
   priorityC: (text) => pushAiQuestion(text, "C"),
-  needsExplanation: (text) => { AppState.weaknessEntries.push({ category: "기타", accept: text, cause: "", effort: "", result: "" }); },
+  needsExplanation: (text, priority, meta) => {
+    const m = meta || {};
+    AppState.weaknessEntries.push({ category: m.topic || "기타", accept: [m.topic, m.detail].filter(Boolean).join(" — ") || text, cause: "", effort: "", result: "" });
+  },
+  interviewerVerificationPoints: (text) => { AppState.aiVerificationNotes.push(text); },
   followUpQuestions: (text) => pushAiQuestion(text, null),
   needStudentVerification: (text) => { AppState.aiVerificationNotes.push(text); },
   fallback: (text) => pushAiQuestion(text, null),

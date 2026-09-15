@@ -435,3 +435,13 @@ body.printing-active #print-mount { display: block; }
 .session-save-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 13px;border:1px solid #d7b86f;border-radius:12px;background:#fffaf0;color:#6d5622;font-size:.82rem;line-height:1.5}.session-save-banner strong{white-space:nowrap}.session-save-banner button{margin-left:auto}
 [data-theme="dark"] .session-save-banner{background:#241f15;color:#dec98d;border-color:#765f2f}
 @media(max-width:640px){.session-save-banner{align-items:flex-start}.session-save-banner button{width:100%;margin-left:0}.trainer-start-row #finish-answer{flex-basis:100%}}
+
+
+/* v6.2 탐구 복원·심층 훈련 */
+.reverse-map-card{margin:12px 0;padding:12px;border:1px solid var(--line,#d9e0ea);border-radius:14px;background:var(--soft,#f7f9fc)}
+.reverse-map-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}.reverse-map-head span{font-size:.82rem;color:var(--muted,#65758b)}
+.reverse-map-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.reverse-map-item{padding:10px;border-radius:12px;background:var(--card,#fff);border:1px solid var(--line,#d9e0ea)}
+.reverse-map-label{display:block;font-size:.72rem;font-weight:800;letter-spacing:.03em;color:var(--primary,#315efb);margin-bottom:3px}.reverse-map-item strong{display:block;font-size:.9rem;margin-bottom:4px}.reverse-map-item p{margin:0 0 5px;line-height:1.45}.reverse-map-item small{color:var(--muted,#65758b);line-height:1.35}
+.staged-followups{list-style:none;padding-left:0}.staged-followups li{display:flex;gap:8px;align-items:flex-start;margin:8px 0}.stage-badge{flex:0 0 auto;font-size:.72rem;font-weight:800;padding:3px 7px;border-radius:999px;background:var(--soft,#eef3ff);color:var(--primary,#315efb)}
+.optional-expand-tip{padding:11px 12px;border-radius:12px;border:1px dashed var(--primary,#315efb);background:var(--soft,#f7f9fc);font-size:.9rem}.optional-expand-tip strong{display:block;margin-bottom:4px}.optional-expand-tip span{color:var(--muted,#65758b);line-height:1.45}
+@media (max-width:640px){.reverse-map-grid{grid-template-columns:1fr}.reverse-map-head{align-items:flex-start;flex-direction:column}}

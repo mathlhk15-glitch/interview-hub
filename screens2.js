@@ -173,8 +173,8 @@ function questionResultCard(q, compact) {
     <h3>${escapeHtml(q.text)}</h3>
     ${evidence}
     <div class="row-gap">
-      <button class="btn-primary small train-btn">30·60초 연습</button>
-      <button class="btn-ghost small follow-btn">꼬리질문 3층</button>
+      <button class="btn-primary small train-btn">말하기 연습</button>
+      <button class="btn-ghost small follow-btn">3단계 심층질문</button>
     </div>
   </div>`);
   card.querySelector(".train-btn").onclick = () => navigate("trainer", { qid: q.id });
@@ -402,14 +402,14 @@ function buildQuestionCard(q) {
       </select>
     </label>
     <p class="muted small">참고: ${escapeHtml(reason)}</p>
-    <button class="btn-ghost small">꼬리질문 3층 열기</button>
+    <button class="btn-ghost small">3단계 심층질문 열기</button>
   </div>`);
   card.querySelector(".pri-select").onchange = (e) => { q.priority = e.target.value || null; };
   card.querySelector(".btn-ghost").onclick = () => navigate("followups", { qid: q.id });
   return card;
 }
 
-// ── STEP6 꼬리질문 3층 (§15) ──────────────────────────────────────────
+// ── STEP6 3단계 심층 꼬리질문 ─────────────────────────────────────────
 registerRoute("followups", (params) => {
   const q = AppState.questions.find((x) => x.id === params.qid) || AppState.questions[0];
   if (!q) {
@@ -417,7 +417,7 @@ registerRoute("followups", (params) => {
     body.appendChild ? null : null;
     const wrap = el(`<div class="stack"></div>`); wrap.appendChild(body);
     wrap.appendChild(el(`<button class="btn-ghost" onclick="navigate('questions')">질문 목록으로</button>`));
-    return screenShell("꼬리질문 3층", "", wrap);
+    return screenShell("3단계 심층질문", "", wrap);
   }
   const body = el(`<div class="stack">
     <div class="card"><p>${escapeHtml(q.text)}</p><p class="muted small">근거: ${escapeHtml(q.evidenceText || "")}</p></div>
@@ -435,7 +435,7 @@ registerRoute("followups", (params) => {
     row.querySelector("textarea").oninput = (e) => { layer.note = e.target.value; };
     layers.appendChild(row);
   });
-  return screenShell("꼬리질문 3층", "사실 → 과정·판단 → 근거·한계", body);
+  return screenShell("3단계 심층질문", "개념·진위 → 과정·시행착오 → 조건변형·응용", body);
 });
 
 // ── 설명이 필요한 기록 대응 4단계 ──────────────────────────────────────
@@ -879,7 +879,7 @@ function aiQuestionCleanCard(value, priority, label) {
     ${evidence}
     ${intent}
     <div class="row-gap ai-action-row">
-      <button class="btn-primary small practice-btn">30·60초 연습</button>
+      <button class="btn-primary small practice-btn">말하기 연습</button>
       <button class="btn-ghost small save-btn">질문 저장</button>
     </div>
   </div>`);
@@ -982,10 +982,10 @@ function aiFollowUpGroupCard(value) {
   </div>`);
   const list = card.querySelector(".ai-followup-list");
   (data.questions || []).forEach((question, idx) => {
-    const qObj = { question, evidenceArea: data.evidenceArea, evidenceQuote: data.evidenceQuote, evaluationPoint: idx === 0 ? "사실·역할 확인" : idx === 1 ? "과정·판단 확인" : "근거·한계 확인" };
+    const qObj = { question, evidenceArea: data.evidenceArea, evidenceQuote: data.evidenceQuote, evaluationPoint: idx === 0 ? "개념·진위 확인" : idx === 1 ? "과정·시행착오 확인" : "조건변형·응용 확인" };
     const row = el(`<div class="ai-followup-row">
       <div class="ai-followup-q"><span class="followup-no">${idx + 1}</span><strong>${escapeHtml(question)}</strong></div>
-      <div class="row-gap"><button class="btn-primary small practice-btn">30·60초 연습</button><button class="btn-ghost small save-btn">질문 저장</button></div>
+      <div class="row-gap"><button class="btn-primary small practice-btn">말하기 연습</button><button class="btn-ghost small save-btn">질문 저장</button></div>
     </div>`);
     row.querySelector(".practice-btn").onclick = () => {
       const q = findOrCreateAiQuestion(qObj, null);
@@ -1037,6 +1037,13 @@ function aiActivityInventoryCard(activity, idx) {
       ${activity.summary ? `<p>${escapeHtml(activity.summary)}</p>` : ""}
       ${(activity.tags || []).length ? `<div class="tag-line">${activity.tags.map((t) => `<span class="mini-tag">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
       ${(activity.sourceConnections || []).length ? `<div class="source-connection-line"><strong>자료 연계</strong>${activity.sourceConnections.map((t) => `<span class="mini-tag source-connection-tag">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
+      ${(() => {
+        const rm = activity.reverseMap || {};
+        const defs = window.APP_DATA.reverseEngineeringFields || [];
+        const has = defs.some((d) => String(rm[d.key] || "").trim());
+        if (!has) return "";
+        return `<div class="reverse-map-card"><div class="reverse-map-head"><strong>탐구 복원 지도</strong><span>결과 문장보다 사고 과정 확인</span></div><div class="reverse-map-grid">${defs.map((d) => `<div class="reverse-map-item"><span class="reverse-map-label">${escapeHtml(d.label)}</span><strong>${escapeHtml(d.title)}</strong><p>${escapeHtml(rm[d.key] || "학생 확인 필요")}</p><small>${escapeHtml(d.hint)}</small></div>`).join("")}</div></div>`;
+      })()}
       ${aiEvidenceHtml(activity.area, activity.evidenceQuote, "근거 원문이 포함되지 않았습니다. 학생부에서 해당 활동을 확인하세요.")}
       <div class="row-gap activity-focus-actions"><button class="btn-ai-strong focus-practice-btn">이 활동 연속훈련</button></div>
       <div class="activity-question-list"></div>
@@ -1103,8 +1110,12 @@ function aiActivityInventoryCard(activity, idx) {
   const fList = details.querySelector(".activity-followup-list");
   if ((activity.followUpQuestions || []).length) {
     fList.appendChild(el(`<h4>예상 꼬리질문</h4>`));
-    const ul = el(`<ul class="followup-bullets"></ul>`);
-    activity.followUpQuestions.forEach((q) => ul.appendChild(el(`<li>${escapeHtml(q)}</li>`)));
+    const ul = el(`<ul class="followup-bullets staged-followups"></ul>`);
+    const stages = window.APP_DATA.followUpLayers || [];
+    activity.followUpQuestions.forEach((q, idx) => {
+      const stage = stages[idx];
+      ul.appendChild(el(`<li>${stage ? `<span class="stage-badge">${escapeHtml(stage.label)}</span>` : ""}<span>${escapeHtml(q)}</span></li>`));
+    });
     fList.appendChild(ul);
   }
   return details;
@@ -1341,6 +1352,7 @@ registerRoute("trainer", (params) => {
     </label>
     <div id="frame-desc" class="notice small"></div>
     <div id="frame-steps" class="stack frame-step-grid"></div>
+    <div id="frame-optional-tip" class="optional-expand-tip" style="display:none"></div>
     <div class="row-gap">
       <label class="field"><span>준비시간(초)</span><input id="prep-sec" type="number" value="10" min="0" max="600"></label>
     </div>
@@ -1350,8 +1362,11 @@ registerRoute("trainer", (params) => {
     </div>
     <div class="row-gap trainer-start-row">
       <button class="btn-primary" id="start30">30초</button>
+      <button class="btn-primary" id="start45">45초 핵심</button>
       <button class="btn-primary" id="start60">60초</button>
       <button class="btn-secondary" id="start90">90초</button>
+      <button class="btn-ghost" id="sprint-btn">⚡ 3초 결론 스퍼트</button>
+      <button class="btn-ghost" id="easy-concept-btn" style="display:none">개념 20초 쉽게</button>
       <button class="btn-secondary" id="finish-answer" disabled>답변 종료</button>
       <button class="btn-ghost" id="cancel-btn">중지</button>
       <button class="btn-ghost" id="crisis-btn">🆘 막혔을 때</button>
@@ -1359,7 +1374,7 @@ registerRoute("trainer", (params) => {
     <div id="rec-status" class="muted small"></div>
     <audio id="playback" controls style="display:none;width:100%"></audio>
     <p class="muted small" id="attempt-count"></p>
-    <div class="notice small">문장을 외우기보다 <strong>핵심어와 사고 순서</strong>를 반복하세요. 녹음은 메모리에만 두고 새로고침하면 사라집니다.</div>
+    <div class="notice small">문장을 외우기보다 <strong>핵심어와 사고 순서</strong>를 반복하세요. <strong>45초 핵심답변은 훈련용 기준</strong>이며 실제 면접에서는 질문에 필요한 만큼 답하세요. 녹음은 메모리에만 두고 새로고침하면 사라집니다.</div>
     <div class="row-gap"><button class="btn-secondary" onclick="navigate('mock-eval')">자가진단 체크하기</button></div>
     <section class="ai-highlight-card compact-ai-card" aria-label="내 답변 AI 피드백">
       <div class="ai-highlight-icon" aria-hidden="true">✨</div>
@@ -1370,6 +1385,7 @@ registerRoute("trainer", (params) => {
 
   const frameSelect = body.querySelector("#frame-select");
   function attemptCount() { return Number(AppState.practiceStats?.[current.id]?.attempts || 0); }
+  function sprintCount() { return Number(AppState.practiceStats?.[current.id]?.sprintAttempts || 0); }
   function depthLabel(depth) { return (window.APP_DATA.sevenDirections || []).find((d) => d.id === depth)?.label || ""; }
   function renderFrame() {
     if (!window.APP_DATA.answerFrames[frame]) frame = "activity";
@@ -1378,6 +1394,13 @@ registerRoute("trainer", (params) => {
     body.querySelector("#frame-desc").textContent = f.desc;
     const stepsBox = body.querySelector("#frame-steps"); stepsBox.innerHTML = "";
     f.steps.forEach((st) => stepsBox.appendChild(el(`<div class="frame-step"><span class="chip">${escapeHtml(st.label)}</span><span class="muted small">${escapeHtml(st.hint)}</span></div>`)));
+    const optional = body.querySelector("#frame-optional-tip");
+    if (f.optionalTip && current.priority === "A") {
+      optional.style.display = "block";
+      optional.innerHTML = `<strong>${escapeHtml(f.optionalTip.label)}</strong><span>${escapeHtml(f.optionalTip.hint)}</span>`;
+    } else { optional.style.display = "none"; optional.innerHTML = ""; }
+    const easyBtn = body.querySelector("#easy-concept-btn");
+    if (easyBtn) easyBtn.style.display = frame === "concept" ? "inline-flex" : "none";
   }
   function renderQuestion() {
     body.querySelector("#cur-q").textContent = current.text;
@@ -1388,7 +1411,7 @@ registerRoute("trainer", (params) => {
     const vf = body.querySelector("#verify-focus");
     if (current.verificationFocus) { vf.style.display="flex"; vf.innerHTML=`<strong>CHECK</strong><span>${escapeHtml(current.verificationFocus)}</span>`; }
     else { vf.style.display="none"; vf.innerHTML=""; }
-    body.querySelector("#attempt-count").textContent = `이 질문 말하기 시도: ${attemptCount()}회`;
+    body.querySelector("#attempt-count").textContent = `이 질문 말하기 시도: ${attemptCount()}회 · 결론 스퍼트: ${sprintCount()}회`;
     if (requestedActivityId) {
       body.querySelector("#focus-title").textContent = current.activityTitle || "핵심활동";
       body.querySelector("#focus-progress").textContent = `${currentIndex + 1} / ${pool.length}`;
@@ -1415,21 +1438,25 @@ registerRoute("trainer", (params) => {
   let trainer = null, trainingActive = false, playbackUrl = null;
   const setTrainingLocked = (locked) => {
     trainingActive = locked;
-    ["#start30","#start60","#start90"].forEach((id)=>body.querySelector(id).disabled=locked);
+    ["#start30","#start45","#start60","#start90","#sprint-btn","#easy-concept-btn"].forEach((id)=>{ const b=body.querySelector(id); if(b) b.disabled=locked; });
     if (!locked) body.querySelector("#finish-answer").disabled = true;
     const rnd=body.querySelector("#random-btn"); if(rnd) rnd.disabled=locked;
     const prev=body.querySelector("#prev-q"); if(prev) prev.disabled=locked || currentIndex<=0;
     const next=body.querySelector("#next-q"); if(next) next.disabled=locked || currentIndex>=pool.length-1;
     frameSelect.disabled=locked;
   };
-  async function runTraining(mainSeconds) {
+  async function runTraining(mainSeconds, options) {
+    options = options || {};
+    const practiceKind = options.kind || "full";
+    const phaseText = options.phaseLabel || `${mainSeconds}초 답변`;
     if (trainingActive || current.id === "empty") return;
     setTrainingLocked(true);
     trainer = new SpeakingTrainer({
       onTick: (remaining) => { body.querySelector("#timer-display").textContent = remaining + "s"; },
       onPhaseChange: (phase, seconds) => {
         body.querySelector("#phase-label").textContent=phase; body.querySelector("#timer-display").textContent=seconds+"s";
-        body.querySelector("#finish-answer").disabled = !String(phase || "").includes("답변");
+        const label = String(phase || "");
+        body.querySelector("#finish-answer").disabled = !(label.includes("답변") || label.includes("첫 문장") || label.includes("쉬운 말"));
       },
       onRecordingBlob: (blob) => {
         if (playbackUrl) URL.revokeObjectURL(playbackUrl);
@@ -1445,17 +1472,48 @@ registerRoute("trainer", (params) => {
       if (prepSec>0 && !(await trainer.runPhase(prepSec,"준비 시간"))) return;
       if (recorded) { const started=trainer.beginRecording(); body.querySelector("#rec-status").textContent=started?"녹음 중… (브라우저 메모리만 사용)":"녹음 시작에 실패하여 스톱워치로 진행합니다."; }
       const answerStartedAt = Date.now();
-      if (!(await trainer.runPhase(mainSeconds, `${mainSeconds}초 답변`))) return;
+      if (!(await trainer.runPhase(mainSeconds, phaseText))) return;
       const actualSeconds = Math.max(1, Math.min(mainSeconds, Math.round((Date.now() - answerStartedAt) / 1000)));
       trainer.stopRecording(); body.querySelector("#phase-label").textContent="완료";
       body.querySelector("#finish-answer").disabled = true;
-      markQuestionPractice(current.id, actualSeconds);
-      body.querySelector("#attempt-count").textContent=`이 질문 말하기 시도: ${attemptCount()}회 · 최근 ${actualSeconds}초`;
+      markQuestionPractice(current.id, actualSeconds, practiceKind);
+      body.querySelector("#attempt-count").textContent=`이 질문 말하기 시도: ${attemptCount()}회 · 결론 스퍼트: ${sprintCount()}회 · 최근 ${actualSeconds}초`;
     } finally { setTrainingLocked(false); }
   }
   body.querySelector("#start30").onclick=()=>runTraining(30);
+  body.querySelector("#start45").onclick=()=>runTraining(45,{phaseLabel:"45초 핵심답변"});
   body.querySelector("#start60").onclick=()=>runTraining(60);
   body.querySelector("#start90").onclick=()=>runTraining(90);
+  body.querySelector("#easy-concept-btn").onclick=()=>runTraining(20,{kind:"easy",phaseLabel:"20초 쉬운 말 설명"});
+  body.querySelector("#sprint-btn").onclick=async()=>{
+    if (trainingActive || current.id === "empty") return;
+    setTrainingLocked(true);
+    trainer = new SpeakingTrainer({
+      onTick: (remaining) => { body.querySelector("#timer-display").textContent = remaining + "s"; },
+      onPhaseChange: (phase, seconds) => {
+        body.querySelector("#phase-label").textContent=phase; body.querySelector("#timer-display").textContent=seconds+"s";
+        const label=String(phase||""); body.querySelector("#finish-answer").disabled=!label.includes("첫 문장");
+      },
+      onRecordingBlob: (blob) => {
+        if (playbackUrl) URL.revokeObjectURL(playbackUrl);
+        playbackUrl=URL.createObjectURL(blob); const audio=body.querySelector("#playback"); audio.src=playbackUrl; audio.style.display="block";
+      },
+      onFallback: (msg) => { body.querySelector("#rec-status").textContent=msg; },
+    });
+    const recorded=await trainer.acquireStream();
+    if (trainer.cancelled) { trainer.releaseStream(); setTrainingLocked(false); return; }
+    body.querySelector("#rec-status").textContent="3초 동안 결론 한 문장만 정리하세요. 이후 12초 안에 첫 문장을 말합니다.";
+    try {
+      if (!(await trainer.runPhase(3,"결론 정리 3초"))) return;
+      if (recorded) trainer.beginRecording();
+      const started=Date.now();
+      if (!(await trainer.runPhase(12,"첫 문장 스퍼트"))) return;
+      const actual=Math.max(1,Math.min(12,Math.round((Date.now()-started)/1000)));
+      trainer.stopRecording(); body.querySelector("#phase-label").textContent="스퍼트 완료"; body.querySelector("#finish-answer").disabled=true;
+      markQuestionPractice(current.id,actual,"sprint");
+      body.querySelector("#attempt-count").textContent=`이 질문 말하기 시도: ${attemptCount()}회 · 결론 스퍼트: ${sprintCount()}회 · 최근 스퍼트 ${actual}초`;
+    } finally { setTrainingLocked(false); }
+  };
   body.querySelector("#finish-answer").onclick=()=>{
     if (!trainer) return;
     const elapsed = trainer.completePhase();
@@ -1469,7 +1527,7 @@ registerRoute("trainer", (params) => {
   });
 
   body.appendChild(buildFlowNav("trainer"));
-  return screenShell(requestedActivityId ? "핵심활동 연속 면접 훈련" : "말하기 훈련", requestedActivityId ? "같은 활동을 사실→동기→과정→역할→개념→한계→확장 순으로 파고듭니다." : "질문에 맞는 답변 틀을 골라 30·60·90초로 반복합니다.", body);
+  return screenShell(requestedActivityId ? "핵심활동 연속 면접 훈련" : "말하기 훈련", requestedActivityId ? "같은 활동을 사실→동기→과정→역할→개념→한계→확장 순으로 파고듭니다." : "질문에 맞는 답변 틀을 골라 30·45·60·90초, 3초 결론 스퍼트로 반복합니다.", body);
 });
 
 function getOrCreateReadinessPracticeQuestion(kind) {

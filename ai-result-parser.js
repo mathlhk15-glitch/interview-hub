@@ -190,9 +190,20 @@ function normalizeActivityQuestion(item) {
   };
 }
 
+
+function normalizeReverseMap(value) {
+  const o = value && typeof value === "object" ? value : {};
+  return {
+    concept: firstText(o, ["concept", "keyConcept", "coreConcept"]),
+    why: firstText(o, ["why", "motive", "personalWhy"]),
+    processLimit: firstText(o, ["processLimit", "process", "limit", "trialAndError"]),
+    sourceOwnership: firstText(o, ["sourceOwnership", "source", "ownership", "evidenceOwnership"]),
+  };
+}
+
 function normalizeActivityInventoryItem(item, idx) {
   if (typeof item === "string") {
-    return { activityId: `A${String(idx + 1).padStart(2, "0")}`, title: item.trim(), area: "", summary: item.trim(), evidenceQuote: "", tags: [], sourceConnections: [], importance: "B", questions: [], followUpQuestions: [] };
+    return { activityId: `A${String(idx + 1).padStart(2, "0")}`, title: item.trim(), area: "", summary: item.trim(), evidenceQuote: "", tags: [], sourceConnections: [], reverseMap: { concept:"", why:"", processLimit:"", sourceOwnership:"" }, importance: "B", questions: [], followUpQuestions: [] };
   }
   const o = item && typeof item === "object" ? item : {};
   const importanceRaw = firstText(o, ["importance", "priority", "grade"]).toUpperCase();
@@ -205,6 +216,7 @@ function normalizeActivityInventoryItem(item, idx) {
     evidenceQuote: firstText(o, ["evidenceQuote", "evidence", "quote", "sourceText"]),
     tags: asArray(o.tags || o.categories).map(toPlainText).filter(Boolean).slice(0, 6),
     sourceConnections: asArray(o.sourceConnections || o.sourcesUsed || o.materialConnections).map(toPlainText).filter(Boolean).slice(0, 6),
+    reverseMap: normalizeReverseMap(o.reverseMap || o.reverseEngineering || o.questionMap),
     importance,
     questions: asArray(o.questions).map(normalizeActivityQuestion).filter((q) => q.question).slice(0, 8),
     followUpQuestions: asArray(o.followUpQuestions || o.followUps).map(toPlainText).filter(Boolean).slice(0, 6),

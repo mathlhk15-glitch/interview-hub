@@ -1,5 +1,5 @@
 /**
- * trainer.js — 30/60초 타이머와 선택적 녹음.
+ * trainer.js — 30/45/60/90초·결론 스퍼트 타이머와 선택적 녹음.
  * 녹음·스트림은 메모리에만 존재하며 서버 전송/자동 저장하지 않습니다.
  */
 function pickSupportedMimeType() {

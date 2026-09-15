@@ -173,11 +173,23 @@ function getReadinessSummary() {
   };
 }
 
-function markQuestionPractice(questionId, seconds) {
+function markQuestionPractice(questionId, seconds, kind) {
   if (!questionId) return;
-  const prev = AppState.practiceStats[questionId] || { attempts: 0 };
+  const prev = AppState.practiceStats[questionId] || { attempts: 0, sprintAttempts: 0, easyAttempts: 0 };
+  const mode = kind || "full";
+  if (mode === "sprint") {
+    AppState.practiceStats[questionId] = {
+      ...prev,
+      sprintAttempts: Number(prev.sprintAttempts || 0) + 1,
+      lastSprintSeconds: Number(seconds || 0),
+      lastSprintAt: new Date().toISOString(),
+    };
+    return;
+  }
   AppState.practiceStats[questionId] = {
+    ...prev,
     attempts: Number(prev.attempts || 0) + 1,
+    easyAttempts: Number(prev.easyAttempts || 0) + (mode === "easy" ? 1 : 0),
     lastSeconds: Number(seconds || 0),
     lastAt: new Date().toISOString(),
   };

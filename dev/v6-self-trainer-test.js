@@ -13,15 +13,17 @@ const parser = fs.readFileSync('ai-result-parser.js','utf8');
 const exp = fs.readFileSync('export.js','utf8');
 const trainer = fs.readFileSync('trainer.js','utf8');
 
-ok('version is v6.1 reviewed', /6\.1-reviewed-self-interview-trainer/.test(config));
-ok('cache bust is v6.1', /style\.css\?v=6\.1/.test(index) && /screens2\.js\?v=6\.1/.test(index));
+ok('version is v6.2', /6\.2-deep-verification-trainer/.test(config));
+ok('cache bust is v6.2', /style\.css\?v=6\.2/.test(index) && /screens2\.js\?v=6\.2/.test(index));
 ok('new product name', /대입 면접 셀프 트레이너/.test(index));
 ok('readiness route exists', /registerRoute\("readiness"/.test(screens2));
 ok('university DB picker exists', /openUniDbPicker/.test(screens));
 ok('activity focused training exists', /이 활동 연속훈련/.test(screens2));
-ok('90 second training exists', /start90/.test(screens2));
+ok('45/90 second training exists', /start45/.test(screens2) && /start90/.test(screens2));
+ok('3 second conclusion sprint exists', /sprint-btn/.test(screens2) && /결론 정리 3초/.test(screens2));
+ok('easy concept drill exists', /easy-concept-btn/.test(screens2) && /20초 쉬운 말 설명/.test(screens2));
 ok('answer finish exists', /id="finish-answer"/.test(screens2) && /completePhase\(\)/.test(trainer));
-ok('actual answer seconds are saved', /markQuestionPractice\(current\.id, actualSeconds\)/.test(screens2));
+ok('actual answer seconds are saved', /markQuestionPractice\(current\.id, actualSeconds, practiceKind\)/.test(screens2));
 ok('route cleanup exists', /setRouteCleanup/.test(app) && /runRouteCleanup/.test(app));
 ok('trainer route cleanup stops media', /setRouteCleanup\(\(\) => \{[\s\S]*?trainer\) trainer\.cancel\(\)/.test(screens2));
 ok('prompt timer cleanup exists', /modeCleanup=\(\)=>\{ if\(iv\)\{clearInterval\(iv\)/.test(screens2));
@@ -34,6 +36,8 @@ ok('PII is rechecked before preview', /const remain = findPiiCandidates\(ta\.val
 ok('AI schema has question depth', /"depth": "motive"/.test(prompt));
 ok('AI schema has recommendedFrame', /recommendedFrame/.test(prompt));
 ok('parser keeps source connections', /sourceConnections/.test(parser));
+ok('parser keeps reverse map', /normalizeReverseMap/.test(parser) && /sourceOwnership/.test(parser));
+ok('prompt asks source ownership verification', /sourceOwnership/.test(prompt) && /출처를 왜 신뢰/.test(prompt));
 ok('backup schema v5', /BACKUP_SCHEMA_VERSION = 5/.test(exp));
 ok('preparation notes export is selectable', /includePreparationNotes/.test(exp) && /id="opt-notes"/.test(screens2));
 ok('import resets existing session', /resetPreparationStateForImport/.test(exp) && /importStateFromJson\(text, \{ reset:true \}\)/.test(screens2));
@@ -45,6 +49,9 @@ const ctx = { window: {} }; vm.createContext(ctx); vm.runInContext(fs.readFileSy
 const d = ctx.window.APP_DATA;
 ok('seven direction map has 7', Array.isArray(d.sevenDirections) && d.sevenDirections.length === 7);
 ok('activity answer frame exists', !!d.answerFrames.activity);
+ok('activity optional expansion tip exists', !!d.answerFrames.activity.optionalTip);
+ok('followup stages include condition variation', Array.isArray(d.followUpLayers) && d.followUpLayers.length === 3 && /조건변형/.test(d.followUpLayers[2].label));
+ok('reverse engineering fields exist', Array.isArray(d.reverseEngineeringFields) && d.reverseEngineeringFields.length === 4);
 ok('concept answer frame exists', !!d.answerFrames.concept);
 ok('mmi answer frame exists', !!d.answerFrames.mmi);
 ok('MMI patterns are 6', Array.isArray(d.mmiFollowUpPatterns) && d.mmiFollowUpPatterns.length === 6);
@@ -74,5 +81,5 @@ const sampleState = {
 const payloadNoNotes = exportCtx.buildExportPayload(sampleState, { includePreparationNotes:false });
 ok('unchecked preparation notes are excluded from JSON', payloadNoNotes.commonAnswers === undefined && payloadNoNotes.practiceStats === undefined && payloadNoNotes.motivation === undefined);
 
-console.log(`v6.1 self trainer test finished. fail=${fail}`);
+console.log(`v6.2 self trainer test finished. fail=${fail}`);
 process.exitCode = fail ? 1 : 0;

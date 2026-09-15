@@ -11,10 +11,11 @@ const screens2 = fs.readFileSync('screens2.js','utf8');
 const prompt = fs.readFileSync('prompt-generator.js','utf8');
 const parser = fs.readFileSync('ai-result-parser.js','utf8');
 const exp = fs.readFileSync('export.js','utf8');
+const printjs = fs.readFileSync('print.js','utf8');
 const trainer = fs.readFileSync('trainer.js','utf8');
 
-ok('version is v6.3', /6\.3-question-file-export/.test(config));
-ok('cache bust is v6.3', /style\.css\?v=6\.3/.test(index) && /screens2\.js\?v=6\.3/.test(index));
+ok('version is v6.4', /6\.4-question-print/.test(config));
+ok('cache bust is v6.4', /style\.css\?v=6\.4/.test(index) && /screens2\.js\?v=6\.4/.test(index));
 ok('new product name', /대입 면접 셀프 트레이너/.test(index));
 ok('readiness route exists', /registerRoute\("readiness"/.test(screens2));
 ok('university DB picker exists', /openUniDbPicker/.test(screens));
@@ -46,7 +47,10 @@ ok('beforeunload warns without clearing raw data', /beforeunload[\s\S]*hasVolati
 ok('practice stats exist', /practiceStats/.test(app));
 ok('question file save button exists', /save-questions-file-btn/.test(screens2) && /exportQuestionsAsText/.test(screens2));
 ok('question file export builds grouped text', /buildQuestionsTextContent/.test(exp) && /redactCommonPii\(String\(q\.evidenceText\)\)/.test(exp));
-ok('print sheet links to full question file save', /질문지 파일로 저장\]을 이용하세요/.test(screens2));
+ok('print sheet links to full question file save', /질문지 전체 인쇄\] 또는 \[질문지 파일로 저장\]/.test(screens2));
+ok('print all questions button exists', /print-questions-btn/.test(screens2) && /openQuestionsPrintView/.test(screens2));
+ok('print all questions has no 90-char truncation', /QUESTIONS_PRINT_EVIDENCE_LIMIT = 200/.test(printjs) && !/buildQuestionsPrintHtml[\s\S]*?PRINT_LIMITS\.question/.test(printjs));
+ok('print all questions warns if empty', /인쇄할 질문이 없습니다/.test(printjs));
 
 const ctx = { window: {} }; vm.createContext(ctx); vm.runInContext(fs.readFileSync('data.js','utf8'), ctx);
 const d = ctx.window.APP_DATA;
@@ -98,5 +102,31 @@ ok('question file includes university info', /테스트대학교/.test(qFileText
 ok('question file redacts phone numbers in evidence', !/010-1234-5678/.test(qFileText) && /\[전화번호 삭제\]/.test(qFileText));
 ok('question file keeps followup notes', /메모1/.test(qFileText));
 
-console.log(`v6.3 self trainer test finished. fail=${fail}`);
+// 질문지 전체 인쇄: 90자 제한 없이, 우선순위별로 나뉘고 개인정보는 가려져야 함.
+const printCtx = {
+  console,
+  window: { addEventListener(){}, },
+  document: { getElementById(){ return { innerHTML: '' }; }, body: { classList: { add(){}, remove(){} } }, documentElement: { dataset: {} }, addEventListener(){} },
+  localStorage: { getItem(){return null;}, setItem(){} },
+  Blob: function(){}, URL: { createObjectURL(){return 'blob:x';}, revokeObjectURL(){} }, setTimeout,
+};
+vm.createContext(printCtx);
+vm.runInContext(app, printCtx);
+vm.runInContext(exp, printCtx);
+vm.runInContext(printjs, printCtx);
+vm.runInContext(`AppState.universities.push({ id: 'u1', name: '테스트대학교', major: '테스트학과', track: '테스트전형' }); AppState.activeUniversityId = 'u1';`, printCtx);
+const longEvidence = '가'.repeat(250);
+const printState = {
+  questions: [
+    { priority: 'A', directionLabel: '개념', text: 'A급 인쇄 질문', evidenceText: `010-9999-8888 ${longEvidence}`, evidenceSection: '세특' },
+    { priority: 'C', directionLabel: '확장', text: 'C급 인쇄 질문' },
+  ],
+};
+const printHtml = printCtx.buildQuestionsPrintHtml(printState);
+ok('print all questions groups by priority', /A · 반드시 준비/.test(printHtml) && /C · 여유가 있으면/.test(printHtml) && !/B · 준비 권장/.test(printHtml));
+ok('print all questions includes university info', /테스트대학교/.test(printHtml));
+ok('print all questions redacts phone numbers', !/010-9999-8888/.test(printHtml) && /\[전화번호 삭제\]/.test(printHtml));
+ok('print all questions truncates only very long evidence, not the question itself', printHtml.includes('A급 인쇄 질문') && !printHtml.includes(longEvidence));
+
+console.log(`v6.4 self trainer test finished. fail=${fail}`);
 process.exitCode = fail ? 1 : 0;

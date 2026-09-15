@@ -22,6 +22,9 @@ class SpeakingTrainer {
     this.chunks = [];
     this.stream = null;
     this.phaseResolve = null;
+    this.phaseStartedAt = 0;
+    this.phaseDuration = 0;
+    this.phaseLabel = "";
     this.cancelled = false;
     this.recordingSupported = typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
   }
@@ -83,6 +86,9 @@ class SpeakingTrainer {
     return new Promise((resolve) => {
       if (this.cancelled) { resolve(false); return; }
       let remaining = Math.max(0, Number(seconds) || 0);
+      this.phaseStartedAt = Date.now();
+      this.phaseDuration = remaining;
+      this.phaseLabel = phaseLabel || "";
       this.onPhaseChange(phaseLabel, remaining);
       if (remaining <= 0) { resolve(true); return; }
       this.phaseResolve = resolve;
@@ -92,16 +98,28 @@ class SpeakingTrainer {
         if (remaining <= 0) {
           clearInterval(this.timer); this.timer = null;
           const done = this.phaseResolve; this.phaseResolve = null;
+          this.phaseStartedAt = 0; this.phaseDuration = 0; this.phaseLabel = "";
           if (done) done(true);
         }
       }, 1000);
     });
   }
 
+  completePhase() {
+    if (!this.phaseResolve) return null;
+    const elapsed = this.phaseStartedAt ? Math.max(0, Math.round((Date.now() - this.phaseStartedAt) / 1000)) : 0;
+    if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    const done = this.phaseResolve; this.phaseResolve = null;
+    this.phaseStartedAt = 0; this.phaseDuration = 0; this.phaseLabel = "";
+    if (done) done(true);
+    return elapsed;
+  }
+
   cancel() {
     this.cancelled = true;
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
     if (this.phaseResolve) { const done = this.phaseResolve; this.phaseResolve = null; done(false); }
+    this.phaseStartedAt = 0; this.phaseDuration = 0; this.phaseLabel = "";
     this.stopRecording();
   }
 }

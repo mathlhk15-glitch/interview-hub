@@ -26,7 +26,7 @@ registerRoute("home", () => {
     <button class="menu-card primary-menu" onclick="navigate('student-dashboard')">
       <span class="menu-emoji" aria-hidden="true">🎯</span>
       <span class="menu-title">학생 면접 준비</span>
-      <span class="menu-desc">생활기록부 전체를 AI로 분석해 활동별 면접문항까지</span>
+      <span class="menu-desc">학생부 분석 → 7단계 질문 → 말하기·꼬리질문·MMI까지</span>
     </button>
     <button class="menu-card" onclick="navigate('parent-mode')">
       <span class="menu-emoji" aria-hidden="true">🏠</span>
@@ -45,17 +45,18 @@ registerRoute("home", () => {
     <button class="btn-ghost small" id="theme-toggle-btn" onclick="toggleTheme()">🌙 어둡게</button>
   </div>`);
   return screenShell(window.APP_CONFIG.APP_NAME,
-    "복잡한 체크 없이 자료를 넣고, 원하는 AI로 생활기록부 전체 활동과 면접문항을 분석합니다.",
+    "내 학생부를 이해하고, 내 말로 답하고, 꼬리질문까지 반복 훈련하는 자기주도 면접 트레이너입니다.",
     body, { noBack: true });
 });
 
 // ── 학생 빠른 시작 — 기본 사용자는 여기서 체크박스를 만지지 않습니다 ─────
 registerRoute("student-dashboard", () => {
   const body = el(`<div class="stack"></div>`);
+  body.appendChild(el(`<div class="session-save-banner"><strong>자동 저장되지 않습니다.</strong><span>새로고침·탭 종료 시 현재 준비 내용이 사라질 수 있습니다. 중요한 작업은 아래의 <b>내 준비 데이터 저장(JSON)</b>으로 백업하세요.</span><button class="btn-ghost small" onclick="navigate('data-io')">지금 백업</button></div>`));
   body.appendChild(el(`<div class="hero-card ai-first-hero">
-    <div class="hero-kicker">AI 분석 중심 · 무료 · API 없음</div>
-    <h2>생활기록부를 넣고, AI가 전체 활동을 빠짐없이 훑게 하세요</h2>
-    <p>프로그램이 짧은 규칙으로 질문을 억지로 만들지 않습니다. 생활기록부 텍스트를 안전하게 추출한 뒤, 사용자가 선택한 AI가 <strong>전체 활동 목록 → 활동별 예상질문 → A급 필수질문 → 핵심활동 심화</strong> 순으로 분석하도록 프롬프트를 만듭니다.</p>
+    <div class="hero-kicker">v6 SELF-INTERVIEW · 무료 · API 없음</div>
+    <h2>학생부를 분석하고, 같은 활동을 단계적으로 끝까지 말해보세요</h2>
+    <p>프로그램이 짧은 규칙으로 질문을 억지로 만들지 않습니다. 생활기록부 텍스트를 안전하게 추출한 뒤, 사용자가 선택한 AI가 <strong>전체 활동 → 7단계 질문 깊이 → 답변 프레임 → 연속 꼬리질문</strong> 순으로 분석하도록 프롬프트를 만듭니다.</p>
     <button class="btn-primary big" id="quick-pdf-btn">1. 생활기록부 PDF 넣기</button>
     <button class="btn-secondary" id="quick-no-record-btn">생활기록부 없이 내 활동으로 시작</button>
     <div class="ai-meta-row"><span>서버 저장 없음</span><span>ChatGPT · Claude · Gemini</span><span>프롬프트 복사 방식</span></div>
@@ -67,6 +68,19 @@ registerRoute("student-dashboard", () => {
   const hasActivityAi = hasDirectActivityRecords();
   if (AppState.aiResultSections) {
     body.appendChild(el(`<button class="btn-primary big" onclick="navigate('ai-results')">최근 AI 전체 분석 결과 다시 보기</button>`));
+  }
+  if (AppState.aiResultSections || AppState.questions.length || AppState.weaknessEntries.length) {
+    const rs = getReadinessSummary();
+    body.appendChild(el(`<section class="readiness-mini-card">
+      <div><span class="hero-kicker">현재 준비 현황</span><h3>무엇을 더 연습해야 하는지 한눈에 보기</h3></div>
+      <div class="readiness-mini-grid">
+        <span><strong>${rs.practicedA}/${rs.totalA}</strong><small>A급 질문</small></span>
+        <span><strong>${rs.practicedConcept}/${rs.conceptTotal}</strong><small>개념 질문</small></span>
+        <span><strong>${rs.weaknessDone}/${rs.weaknessTotal}</strong><small>약점 소명</small></span>
+        <span><strong>${rs.totalAttempts}</strong><small>말하기 시도</small></span>
+      </div>
+      <button class="btn-secondary" onclick="navigate('readiness')">준비 현황 자세히</button>
+    </section>`));
   }
   if (hasRecordAi) {
     body.appendChild(el(`<section class="ai-highlight-card ai-primary-card" aria-label="생활기록부 전체 AI 면접문항 분석">
@@ -140,6 +154,7 @@ registerRoute("student-dashboard", () => {
         <button class="btn-ghost small" onclick="navigate('roadmap')">D-Day 로드맵</button>
         <button class="btn-ghost small" onclick="navigate('blind-check')">블라인드 점검</button>
         <button class="btn-ghost small" onclick="navigate('common12')">빈출 12유형</button>
+        <button class="btn-ghost small" onclick="navigate('special-track')">제시문·MMI 연습</button>
       </div>
     </div>
   </details>`);
@@ -183,7 +198,10 @@ registerRoute("universities", () => {
   const listBox = el(`<div class="stack" id="uni-list"></div>`);
   body.appendChild(listBox);
   renderUniList(listBox);
-  const addBtn = el(`<button class="btn-primary">+ 대학 추가</button>`);
+  const dbBtn = el(`<button class="btn-secondary">2027 초기 대학 DB에서 불러오기</button>`);
+  dbBtn.onclick = () => openUniDbPicker(() => renderUniList(listBox));
+  body.appendChild(dbBtn);
+  const addBtn = el(`<button class="btn-primary">+ 직접 입력</button>`);
   addBtn.onclick = () => { openUniEditor(null, () => renderUniList(listBox)); };
   body.appendChild(addBtn);
   body.appendChild(buildFlowNav("universities"));
@@ -203,7 +221,7 @@ function renderUniList(box) {
         <span class="badge">${escapeHtml(fmtDday(dd))}</span>
       </div>
       <p>${escapeHtml(u.major || "")} · ${escapeHtml(u.track || "")}</p>
-      <p class="muted small">면접유형: ${escapeHtml(effectiveInterviewType(u) || "미판별")}</p>
+      <p class="muted small">면접유형: ${escapeHtml(effectiveInterviewType(u) || "미판별")}${u.academicYear ? ` · ${escapeHtml(u.academicYear)}학년도` : ""}</p>${u.dbSource ? `<p class="muted tiny">DB 출처: ${escapeHtml(u.dbSource)} · 확인 ${escapeHtml(u.dbCheckedDate || "미상")}</p>` : ""}
       <div class="row-actions">
         <button class="btn-ghost small">수정</button>
         <button class="btn-ghost small danger">삭제</button>
@@ -219,10 +237,58 @@ function renderUniList(box) {
   });
 }
 
+function openUniDbPicker(onDone) {
+  const db = window.APP_DATA.universityDb || [];
+  const modal = el(`<div class="modal-backdrop"><div class="modal card uni-db-modal">
+    <h2>2027 초기 대학 면접 DB</h2>
+    <p class="notice small">교육청 자료에서 전형 구조만 요약한 시작용 DB입니다. 실제 문항 원문은 포함하지 않습니다. <strong>최종 정보는 반드시 대학 입학처 모집요강에서 다시 확인하세요.</strong></p>
+    <label class="field"><span>대학·전형 검색</span><input id="db-search" placeholder="예: 부산 / 경상국립 / 경북 / 숭실"></label>
+    <div id="db-list" class="stack"></div>
+    <div class="modal-actions"><button class="btn-ghost" id="db-close">닫기</button></div>
+  </div></div>`);
+  document.body.appendChild(modal);
+  const list = modal.querySelector("#db-list");
+  function draw() {
+    const q = modal.querySelector("#db-search").value.trim().toLowerCase();
+    list.innerHTML = "";
+    const rows = db.filter((x) => !q || `${x.name} ${x.track} ${x.majorGroup}`.toLowerCase().includes(q));
+    rows.forEach((x) => {
+      const card = el(`<div class="card uni-db-card">
+        <div class="row-between"><strong>${escapeHtml(x.name)}</strong><span class="badge">${escapeHtml(x.academicYear)}학년도</span></div>
+        <p>${escapeHtml(x.track)} · ${escapeHtml(x.majorGroup || "")}</p>
+        <p class="muted small">${escapeHtml(x.ratio || "")} · ${escapeHtml(x.duration || "")}</p>
+        <p class="muted small">${escapeHtml(x.evalWeights || "")}</p>
+        <p class="muted tiny">출처: ${escapeHtml(x.source)} · 확인 ${escapeHtml(x.checkedDate)}</p>
+        <button class="btn-primary small">이 정보 불러오기</button>
+      </div>`);
+      card.querySelector("button").onclick = () => {
+        const u = {
+          id: uid("uni"), academicYear: x.academicYear, name: x.name, major: "", track: x.track,
+          interviewDate: "", checkInTime: "", location: "", duration: x.duration || "", prepTime: "",
+          interviewerCount: x.interviewerCount || "", ratio: x.ratio || "", stageType: x.stageType || "단계형",
+          evalWeights: x.evalWeights || "", blind: x.blind || "미확인", promptBased: x.promptBased || "미확인",
+          docBased: x.docBased || "미확인", memoAllowed: "미확인", officialChecked: false,
+          schoolViolenceNote: "", typeGuess: x.docBased === "예" ? "서류 기반" : "", typeGuessOverride: "",
+          specialTrack: "none", memo: `초기 DB에서 불러옴. 최신 모집요강으로 반드시 재확인 필요.`,
+          sourceLog: [{ label: `${x.source} (${x.sourceType || "요약"})`, checkedDate: x.checkedDate }],
+          dbSource: x.source, dbCheckedDate: x.checkedDate,
+        };
+        AppState.universities.push(u); AppState.activeUniversityId = u.id;
+        modal.remove(); onDone && onDone(); toast("대학 정보를 불러왔습니다. 최신 모집요강 확인 후 수정하세요.");
+      };
+      list.appendChild(card);
+    });
+    if (!rows.length) list.appendChild(el(`<p class="muted">검색 결과가 없습니다. 직접 입력을 사용하세요.</p>`));
+  }
+  modal.querySelector("#db-search").oninput = draw;
+  modal.querySelector("#db-close").onclick = () => modal.remove();
+  draw();
+}
+
 function openUniEditor(existing, onDone) {
   const isNew = !existing;
   const u = existing || {
-    id: uid("uni"), name: "", major: "", track: "", interviewDate: "", checkInTime: "",
+    id: uid("uni"), academicYear: "2027", name: "", major: "", track: "", interviewDate: "", checkInTime: "",
     location: "", duration: "", prepTime: "", interviewerCount: "", ratio: "",
     stageType: "일괄합산", evalWeights: "", blind: "미확인", promptBased: "미확인",
     docBased: "미확인", memoAllowed: "미확인", officialChecked: false, schoolViolenceNote: "",
@@ -233,6 +299,7 @@ function openUniEditor(existing, onDone) {
   const modal = el(`<div class="modal-backdrop"><div class="modal card">
     <h2>${isNew ? "대학 추가" : "대학 정보 수정"}</h2>
     <div class="grid-2">
+      <label class="field"><span>학년도</span><input id="f-year" value="${escapeHtml(u.academicYear || "2027")}"></label>
       <label class="field"><span>대학명</span><input id="f-name" value="${escapeHtml(u.name)}"></label>
       <label class="field"><span>학과명</span><input id="f-major" value="${escapeHtml(u.major)}"></label>
       <label class="field"><span>전형명</span><input id="f-track" value="${escapeHtml(u.track)}"></label>
@@ -277,7 +344,7 @@ function openUniEditor(existing, onDone) {
   modal.querySelector("#save-btn").onclick = () => {
     const g = (id) => modal.querySelector(id).value;
     Object.assign(u, {
-      name: g("#f-name"), major: g("#f-major"), track: g("#f-track"), interviewDate: g("#f-date"),
+      academicYear: g("#f-year") || "2027", name: g("#f-name"), major: g("#f-major"), track: g("#f-track"), interviewDate: g("#f-date"),
       checkInTime: g("#f-checkin"), location: g("#f-loc"), duration: g("#f-duration"), prepTime: g("#f-prep"),
       interviewerCount: g("#f-interviewers"), ratio: g("#f-ratio"), stageType: g("#f-stage"),
       evalWeights: g("#f-weights"), blind: g("#f-blind"), promptBased: g("#f-prompt"), docBased: g("#f-docbased"),

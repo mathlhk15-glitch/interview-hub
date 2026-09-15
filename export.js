@@ -1,13 +1,13 @@
 /**
  * export.js
  * 준비 데이터 백업/복원과 면접후기 내보내기.
- * - schemaVersion 3
+ * - schemaVersion 5
  * - 학생부 PDF 전체 원문, 녹음, AI 원문은 어떤 경우에도 내보내지 않습니다.
  * - 직접 입력 기록은 기본 백업합니다.
  * - 학생부에서 파생된 기록과 질문 근거문장은 사용자가 별도 선택한 경우에만 포함합니다.
  */
 
-const BACKUP_SCHEMA_VERSION = 3;
+const BACKUP_SCHEMA_VERSION = 5;
 
 function downloadFile(filename, content, mime) {
   const blob = new Blob([content], { type: mime || "application/octet-stream" });
@@ -29,6 +29,7 @@ function buildExportPayload(state, options) {
   const includeQuestions = options.includeQuestions !== false;
   const includeLogs = options.includeLogs !== false;
   const includeWeakness = options.includeWeakness !== false;
+  const includePreparationNotes = options.includePreparationNotes !== false;
 
   const exportRecords = (state.records || []).filter((r) => r.source === "직접 입력" || includeRecordDerived);
   const exportedRecordIds = new Set(exportRecords.map((r) => r.id));
@@ -37,12 +38,21 @@ function buildExportPayload(state, options) {
     schemaVersion: BACKUP_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
     records: cloneJson(exportRecords),
-    commonAnswers: cloneJson(state.commonAnswers || {}),
-    mockEvaluation: cloneJson(state.mockEvaluation || { checks: {}, good: "", fix: "" }),
-    aiVerificationNotes: cloneJson(state.aiVerificationNotes || []),
-    introKeywords: state.introKeywords || "",
-    lastWord: state.lastWord || "",
-    motivation: {
+    _includesRecordDerived: includeRecordDerived,
+    _includesRecordEvidence: includeEvidence,
+    _includesPreparationNotes: includePreparationNotes,
+  };
+
+
+  if (includePreparationNotes) {
+    payload.commonAnswers = cloneJson(state.commonAnswers || {});
+    payload.mockEvaluation = cloneJson(state.mockEvaluation || { checks: {}, good: "", fix: "" });
+    payload.aiVerificationNotes = cloneJson(state.aiVerificationNotes || []);
+    payload.practiceStats = cloneJson(state.practiceStats || {});
+    payload.mmiPracticeCount = Number(state.mmiPracticeCount || 0);
+    payload.introKeywords = state.introKeywords || "";
+    payload.lastWord = state.lastWord || "";
+    payload.motivation = {
       motiveMoment: state.motiveMoment || "",
       motiveActions: cloneJson(state.motiveActions || []),
       majorCourses: state.majorCourses || "",
@@ -50,10 +60,8 @@ function buildExportPayload(state, options) {
       favoriteCourseWhy: state.favoriteCourseWhy || "",
       afterAdmission: state.afterAdmission || "",
       motiveOneLine: state.motiveOneLine || "",
-    },
-    _includesRecordDerived: includeRecordDerived,
-    _includesRecordEvidence: includeEvidence,
-  };
+    };
+  }
 
   if (includeUniversities) {
     payload.universities = cloneJson(state.universities || []);
@@ -79,7 +87,8 @@ function buildExportPayload(state, options) {
 
   payload._note = "이 파일에는 면접 준비 데이터가 담겨 있습니다. 공용 기기·공용 클라우드 저장에 주의하세요. " +
     (includeRecordDerived ? "학생부에서 파생된 정리 기록이 포함되어 있습니다. " : "학생부에서 파생된 정리 기록은 제외되었습니다. ") +
-    (includeEvidence ? "질문의 학생부 근거 문장이 포함되어 있습니다." : "질문의 학생부 근거 문장은 제외되었습니다.");
+    (includeEvidence ? "질문의 학생부 근거 문장이 포함되어 있습니다. " : "질문의 학생부 근거 문장은 제외되었습니다. ") +
+    (includePreparationNotes ? "기타 면접 준비 메모·자가평가·연습기록이 포함되어 있습니다." : "기타 면접 준비 메모·자가평가·연습기록은 제외되었습니다.");
   return payload;
 }
 
@@ -88,11 +97,23 @@ function exportStateAsJson(state, options) {
   downloadFile(`interview-hub-backup-${Date.now()}.json`, JSON.stringify(payload, null, 2), "application/json");
 }
 
-function importStateFromJson(jsonText) {
+function resetPreparationStateForImport() {
+  AppState.universities = []; AppState.activeUniversityId = null;
+  AppState.records = []; AppState.recordRawText = ""; AppState.activities = []; AppState.questions = [];
+  AppState.interviewLogs = []; AppState.aiResultRaw = ""; AppState.weaknessEntries = [];
+  AppState.commonAnswers = {}; AppState.mockEvaluation = { checks: {}, good: "", fix: "" };
+  AppState.aiResultSections = null; AppState.aiDeepResult = null; AppState.aiVerificationNotes = [];
+  AppState.analysisResult = null; AppState.analysisUpdatedAt = null; AppState.practiceStats = {}; AppState.mmiPracticeCount = 0;
+  AppState.introKeywords = ""; AppState.lastWord = ""; AppState.motiveMoment = ""; AppState.motiveActions = [];
+  AppState.majorCourses = ""; AppState.majorSourceLog = ""; AppState.favoriteCourseWhy = ""; AppState.afterAdmission = ""; AppState.motiveOneLine = "";
+}
+
+function importStateFromJson(jsonText, options) {
   try {
     const data = JSON.parse(jsonText);
     const version = Number(data.schemaVersion || 1);
     if (version > BACKUP_SCHEMA_VERSION) return { ok: false, reason: `이 백업은 더 새로운 버전(schema ${version})에서 만들어졌습니다.` };
+    if (!options || options.reset !== false) resetPreparationStateForImport();
 
     if (Array.isArray(data.universities)) AppState.universities = data.universities;
     if (Array.isArray(data.records)) AppState.records = data.records.map((r) => ({
@@ -107,6 +128,8 @@ function importStateFromJson(jsonText) {
     if (typeof data.commonAnswers === "object" && data.commonAnswers) AppState.commonAnswers = data.commonAnswers;
     if (typeof data.mockEvaluation === "object" && data.mockEvaluation) AppState.mockEvaluation = data.mockEvaluation;
     if (Array.isArray(data.aiVerificationNotes)) AppState.aiVerificationNotes = data.aiVerificationNotes;
+    if (typeof data.practiceStats === "object" && data.practiceStats) AppState.practiceStats = data.practiceStats;
+    if (Number.isFinite(Number(data.mmiPracticeCount))) AppState.mmiPracticeCount = Number(data.mmiPracticeCount);
     if (typeof data.introKeywords === "string") AppState.introKeywords = data.introKeywords;
     if (typeof data.lastWord === "string") AppState.lastWord = data.lastWord;
 

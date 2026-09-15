@@ -714,10 +714,24 @@ function renderAiWizard(mount, mode) {
     wizard.appendChild(el(`<p class="muted small">제거 후보 목록: ${window.APP_DATA.piiRedactionHints.join(", ")}</p>`));
     if (hits.length) wizard.appendChild(el(`<div class="notice small">자동 탐지된 후보: ${hits.map(escapeHtml).join(" / ")}</div>`));
     const ta = el(`<textarea id="redact-ta" rows="8">${escapeHtml(raw)}</textarea>`);
-    wizard.appendChild(el(`<p class="label">PDF 추출이 어색한 부분은 여기서 바로 고치고, 이름·학교명 등 불필요한 개인정보는 지우거나 [ ]로 바꾸세요</p>`));
+    wizard.appendChild(el(`<p class="label">PDF 추출이 어색한 부분은 여기서 바로 고치고, 이름·학교명·학번 등 불필요한 개인정보는 지우거나 [ ]로 바꾸세요</p>`));
     wizard.appendChild(ta);
-    const next = el(`<button class="btn-primary">다음 · 전송 내용 미리보기</button>`);
-    next.onclick = () => { state.redactedText = ta.value; state.step = 3; renderStep(); };
+    const maskBtn = el(`<button class="btn-ghost small" type="button">개인정보 후보 자동 가리기</button>`);
+    maskBtn.onclick = () => {
+      ta.value = maskPiiCandidates(ta.value);
+      const left = findPiiCandidates(ta.value);
+      toast(left.length ? `자동 가리기 후에도 후보 ${left.length}종이 남았습니다. 직접 확인하세요.` : "탐지 가능한 개인정보 후보를 가렸습니다. 원문을 직접 다시 확인하세요.");
+    };
+    wizard.appendChild(maskBtn);
+    const privacyCheck = el(`<label class="field checkbox"><input type="checkbox" id="privacy-reviewed"> 이름·학교명·학번·연락처·보호자 정보 등 불필요한 개인정보를 직접 확인했습니다</label>`);
+    wizard.appendChild(privacyCheck);
+    const next = el(`<button class="btn-primary" disabled>다음 · 전송 내용 미리보기</button>`);
+    privacyCheck.querySelector("input").onchange = (e) => { next.disabled = !e.target.checked; };
+    next.onclick = () => {
+      const remain = findPiiCandidates(ta.value);
+      if (remain.length && !confirm(`개인정보 후보가 아직 남아 있습니다: ${remain.join(" / ")}\n그래도 전송 내용 미리보기로 진행할까요?`)) return;
+      state.redactedText = ta.value; state.step = 3; renderStep();
+    };
     wizard.appendChild(next);
   }
 
@@ -833,12 +847,22 @@ function findOrCreateAiQuestion(value, priority) {
     evidenceText: data.evidenceQuote || "",
     evidenceSection: data.evidenceArea || "",
     hint: data.evaluationPoint || "",
+    depth: data.depth || value?.depth || "",
+    recommendedFrame: data.recommendedFrame || value?.recommendedFrame || "",
+    verificationFocus: data.verificationFocus || value?.verificationFocus || "",
+    activityId: data.activityId || value?.activityId || "",
+    activityTitle: value?.activityTitle || "",
   });
   else {
     if (priority && !q.priority) q.priority = priority;
     if (!q.evidenceText && data.evidenceQuote) q.evidenceText = data.evidenceQuote;
     if (!q.evidenceSection && data.evidenceArea) q.evidenceSection = data.evidenceArea;
     if (!q.hint && data.evaluationPoint) q.hint = data.evaluationPoint;
+    if (!q.depth && (data.depth || value?.depth)) q.depth = data.depth || value.depth;
+    if (!q.recommendedFrame && (data.recommendedFrame || value?.recommendedFrame)) q.recommendedFrame = data.recommendedFrame || value.recommendedFrame;
+    if (!q.verificationFocus && (data.verificationFocus || value?.verificationFocus)) q.verificationFocus = data.verificationFocus || value.verificationFocus;
+    if (!q.activityId && (data.activityId || value?.activityId)) q.activityId = data.activityId || value.activityId;
+    if (!q.activityTitle && value?.activityTitle) q.activityTitle = value.activityTitle;
   }
   return q;
 }
@@ -900,6 +924,17 @@ function aiFactCleanCard(value, kind) {
     ${evidence}
     <div class="row-gap ai-action-row"><button class="btn-ghost small adopt-btn">${escapeHtml(meta.button)}</button></div>
   </div>`);
+  if (kind === "needsExplanation") {
+    const row = card.querySelector(".ai-action-row");
+    const practice = el(`<button class="btn-secondary small">약점 소명 연습 열기</button>`);
+    practice.onclick = () => {
+      const handler = AI_ADOPT_HANDLERS[kind];
+      const already = AppState.weaknessEntries.some((w) => String(w.accept || "").includes(String(title || "")));
+      if (!already && handler) handler(saveText || title || bodyText, null, data);
+      navigate("weakness");
+    };
+    row.appendChild(practice);
+  }
   const btn = card.querySelector(".adopt-btn");
   btn.onclick = () => {
     if (kind === "coreActivities" && AppState.activities.length >= 3) {
@@ -990,6 +1025,8 @@ function appendAiCleanSection(box, title, subtitle, items, renderer, collapsed) 
 
 function aiActivityInventoryCard(activity, idx) {
   const importance = ["A", "B", "C"].includes(activity.importance) ? activity.importance : "B";
+  const depthDefs = window.APP_DATA.sevenDirections || [];
+  const frameLabels = Object.fromEntries(Object.entries(window.APP_DATA.answerFrames || {}).map(([k,v]) => [k, v.label]));
   const details = el(`<details class="card ai-activity-inventory-card" ${importance === "A" ? "open" : ""}>
     <summary>
       <span class="activity-index">${idx + 1}</span>
@@ -999,30 +1036,70 @@ function aiActivityInventoryCard(activity, idx) {
     <div class="activity-inventory-body">
       ${activity.summary ? `<p>${escapeHtml(activity.summary)}</p>` : ""}
       ${(activity.tags || []).length ? `<div class="tag-line">${activity.tags.map((t) => `<span class="mini-tag">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
+      ${(activity.sourceConnections || []).length ? `<div class="source-connection-line"><strong>자료 연계</strong>${activity.sourceConnections.map((t) => `<span class="mini-tag source-connection-tag">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
       ${aiEvidenceHtml(activity.area, activity.evidenceQuote, "근거 원문이 포함되지 않았습니다. 학생부에서 해당 활동을 확인하세요.")}
+      <div class="row-gap activity-focus-actions"><button class="btn-ai-strong focus-practice-btn">이 활동 연속훈련</button></div>
       <div class="activity-question-list"></div>
       <div class="activity-followup-list"></div>
     </div>
   </details>`);
+
+  function saveAllForActivity() {
+    const saved = [];
+    (activity.questions || []).forEach((q) => {
+      const qObj = {
+        question: q.question, evidenceArea: activity.area, evidenceQuote: activity.evidenceQuote,
+        evaluationPoint: q.evaluationPoint || q.type || "", depth: q.depth || "",
+        recommendedFrame: q.recommendedFrame || "", verificationFocus: q.verificationFocus || "",
+        activityId: activity.activityId, activityTitle: activity.title,
+      };
+      const item = findOrCreateAiQuestion(qObj, importance); if (item) saved.push(item);
+    });
+    (activity.followUpQuestions || []).forEach((fq) => {
+      const item = findOrCreateAiQuestion({
+        question: fq, evidenceArea: activity.area, evidenceQuote: activity.evidenceQuote,
+        evaluationPoint: "꼬리질문 대응", depth: "limit", recommendedFrame: "activity",
+        verificationFocus: "처음 답변의 근거·한계와 일관되게 대응", activityId: activity.activityId, activityTitle: activity.title,
+      }, importance); if (item) saved.push(item);
+    });
+    return saved;
+  }
+  details.querySelector(".focus-practice-btn").onclick = () => {
+    const saved = saveAllForActivity();
+    if (!saved.length) { toast("이 활동의 질문이 없습니다."); return; }
+    navigate("trainer", { qid: saved[0].id, activityId: activity.activityId });
+  };
+
   const qList = details.querySelector(".activity-question-list");
   if ((activity.questions || []).length) {
     qList.appendChild(el(`<h4>이 활동에서 준비할 질문</h4>`));
     activity.questions.forEach((q, qidx) => {
+      const depthDef = depthDefs.find((d) => d.id === q.depth);
       const qObj = {
-        question: q.question,
-        evidenceArea: activity.area,
-        evidenceQuote: activity.evidenceQuote,
-        evaluationPoint: q.evaluationPoint || q.type || "",
+        question: q.question, evidenceArea: activity.area, evidenceQuote: activity.evidenceQuote,
+        evaluationPoint: q.evaluationPoint || q.type || "", depth: q.depth || "",
+        recommendedFrame: q.recommendedFrame || "", verificationFocus: q.verificationFocus || "",
+        activityId: activity.activityId, activityTitle: activity.title,
       };
+      const metaBadges = [
+        depthDef ? depthDef.label : (q.type || `질문 ${qidx + 1}`),
+        q.recommendedFrame && frameLabels[q.recommendedFrame] ? `추천틀: ${frameLabels[q.recommendedFrame].split(" (")[0]}` : "",
+      ].filter(Boolean);
       const row = el(`<div class="inventory-question-row">
-        <div><span class="question-type">${escapeHtml(q.type || `질문 ${qidx + 1}`)}</span><strong>${escapeHtml(q.question || "")}</strong>${q.evaluationPoint ? `<small>${escapeHtml(q.evaluationPoint)}</small>` : ""}</div>
-        <div class="row-gap"><button class="btn-primary small practice-btn">30·60초 연습</button><button class="btn-ghost small save-btn">질문 저장</button></div>
+        <div>
+          <div class="question-meta-line">${metaBadges.map((x) => `<span class="question-type">${escapeHtml(x)}</span>`).join("")}</div>
+          <strong>${escapeHtml(q.question || "")}</strong>
+          ${q.evaluationPoint ? `<small>${escapeHtml(q.evaluationPoint)}</small>` : ""}
+          ${q.verificationFocus ? `<small class="verification-focus-inline">CHECK · ${escapeHtml(q.verificationFocus)}</small>` : ""}
+        </div>
+        <div class="row-gap"><button class="btn-primary small practice-btn">말하기 연습</button><button class="btn-ghost small save-btn">질문 저장</button></div>
       </div>`);
-      row.querySelector(".practice-btn").onclick = () => { const saved = findOrCreateAiQuestion(qObj, importance); if (saved) navigate("trainer", { qid: saved.id }); };
+      row.querySelector(".practice-btn").onclick = () => { const saved = findOrCreateAiQuestion(qObj, importance); if (saved) navigate("trainer", { qid: saved.id, activityId: activity.activityId }); };
       row.querySelector(".save-btn").onclick = (e) => { findOrCreateAiQuestion(qObj, importance); e.currentTarget.textContent = "저장됨"; e.currentTarget.disabled = true; toast("질문을 저장했습니다."); };
       qList.appendChild(row);
     });
   } else qList.appendChild(el(`<p class="muted small">이 활동의 질문이 비어 있습니다. AI에게 해당 활동 질문을 추가해 달라고 요청하세요.</p>`));
+
   const fList = details.querySelector(".activity-followup-list");
   if ((activity.followUpQuestions || []).length) {
     fList.appendChild(el(`<h4>예상 꼬리질문</h4>`));
@@ -1194,9 +1271,12 @@ function buildAiResultCard(c, sectionKey, requireEditBeforeAdopt, requireFactVer
 
 function pushAiQuestion(text, priority, meta) {
   const m = meta || {};
+  const depthDef = (window.APP_DATA.sevenDirections || []).find((d) => d.id === m.depth);
   const q = {
-    id: uid("q"), recordId: null, direction: "ai", directionLabel: "AI 제안", text, hint: m.hint || "",
+    id: uid("q"), recordId: null, direction: m.depth || "ai", directionLabel: depthDef?.label || "AI 제안", text, hint: m.hint || "",
     evidenceText: m.evidenceText || "", evidenceSection: m.evidenceSection || "", source: "AI 제안", priority: priority || null,
+    depth: m.depth || "", recommendedFrame: m.recommendedFrame || "", verificationFocus: m.verificationFocus || "",
+    activityId: m.activityId || "", activityTitle: m.activityTitle || "",
     followUps: window.APP_DATA.followUpLayers.map((l) => ({ ...l, done: false, note: "" })),
   };
   AppState.questions.push(q);
@@ -1226,128 +1306,243 @@ const AI_ADOPT_HANDLERS = {
   default: (text) => pushAiQuestion(text, null),
 };
 
-// ── STEP9 30초·60초 훈련 (STAR/OREO, iOS 대응 녹음, 정직한 반복 카운터) ─
+// ── v6 말하기 훈련 — 질문 추천 프레임 + 활동 연속훈련 + 위기 대응 ────────
 registerRoute("trainer", (params) => {
-  const pool = AppState.questions.length ? AppState.questions : [{ text: "질문을 먼저 만들어주세요.", directionLabel: "" }];
-  let current = (params && params.qid && pool.find((q) => q.id === params.qid)) || pool[Math.floor(Math.random() * pool.length)];
-  let frame = "star";
-  const attemptsByQuestion = new Map();
-  const questionKey = () => current.id || current.text;
-  const currentAttemptCount = () => attemptsByQuestion.get(questionKey()) || 0;
+  const all = AppState.questions.length ? AppState.questions : [{ id:"empty", text: "질문을 먼저 만들어주세요.", directionLabel: "" }];
+  const requestedActivityId = params?.activityId || "";
+  let pool = requestedActivityId ? all.filter((q) => q.activityId === requestedActivityId) : all;
+  if (!pool.length) pool = all;
+  let current = (params?.qid && pool.find((q) => q.id === params.qid)) || pool[0] || all[0];
+  let currentIndex = Math.max(0, pool.findIndex((q) => q.id === current.id));
+  const frameKeys = ["activity", "star", "oreo", "concept", "mmi"].filter((k) => window.APP_DATA.answerFrames[k]);
+
+  function inferFrame(q) {
+    if (q?.recommendedFrame && window.APP_DATA.answerFrames[q.recommendedFrame]) return q.recommendedFrame;
+    const text = `${q?.text || ""} ${q?.directionLabel || ""}`;
+    if (q?.depth === "concept" || /원리|개념|정의|설명/.test(text)) return "concept";
+    if (/갈등|협력|리더|실패|극복|도운 경험/.test(text)) return "star";
+    if (/생각|찬성|반대|가치|윤리|어떻게 판단/.test(text)) return "oreo";
+    return "activity";
+  }
+  let frame = inferFrame(current);
 
   const body = el(`<div class="stack">
-    <div class="card">
-      <p class="label">현재 질문</p>
-      <p id="cur-q">${escapeHtml(current.text)}</p>
-      <button class="btn-ghost small" id="random-btn">질문 랜덤 선택</button>
+    ${requestedActivityId ? `<div class="focus-training-banner"><span class="hero-kicker">같은 활동 연속훈련</span><strong id="focus-title">${escapeHtml(current.activityTitle || "핵심활동")}</strong><span id="focus-progress"></span></div>` : ""}
+    <div class="card trainer-question-card">
+      <div class="row-between"><p class="label">현재 질문</p><div id="question-meta" class="question-meta-line"></div></div>
+      <p id="cur-q" class="trainer-question-text">${escapeHtml(current.text)}</p>
+      ${current.verificationFocus ? `<div id="verify-focus" class="ai-student-check"><strong>CHECK</strong><span>${escapeHtml(current.verificationFocus)}</span></div>` : `<div id="verify-focus" class="ai-student-check" style="display:none"></div>`}
+      <div class="row-gap trainer-nav-row">
+        ${requestedActivityId ? '<button class="btn-ghost small" id="prev-q">◀ 이전 질문</button><button class="btn-ghost small" id="next-q">다음 질문 ▶</button>' : '<button class="btn-ghost small" id="random-btn">질문 랜덤 선택</button>'}
+      </div>
     </div>
-    <label class="field"><span>프레임 선택</span>
-      <select id="frame-select">
-        <option value="star">${escapeHtml(window.APP_DATA.answerFrames.star.label)}</option>
-        <option value="oreo">${escapeHtml(window.APP_DATA.answerFrames.oreo.label)}</option>
-      </select>
+    <label class="field"><span>답변 프레임 <small class="muted">질문 유형에 따라 자동 추천됩니다</small></span>
+      <select id="frame-select">${frameKeys.map((k) => `<option value="${k}">${escapeHtml(window.APP_DATA.answerFrames[k].label)}</option>`).join("")}</select>
     </label>
     <div id="frame-desc" class="notice small"></div>
-    <div id="frame-steps" class="stack"></div>
+    <div id="frame-steps" class="stack frame-step-grid"></div>
     <div class="row-gap">
-      <label class="field"><span>준비시간(초)</span><input id="prep-sec" type="number" value="10" min="0"></label>
+      <label class="field"><span>준비시간(초)</span><input id="prep-sec" type="number" value="10" min="0" max="600"></label>
     </div>
     <div class="timer-box">
       <div id="phase-label" class="phase-label">대기 중</div>
       <div id="timer-display" class="timer-display">--</div>
     </div>
-    <div class="row-gap">
-      <button class="btn-primary" id="start30">30초 훈련 시작</button>
-      <button class="btn-primary" id="start60">60초 훈련 시작</button>
+    <div class="row-gap trainer-start-row">
+      <button class="btn-primary" id="start30">30초</button>
+      <button class="btn-primary" id="start60">60초</button>
+      <button class="btn-secondary" id="start90">90초</button>
+      <button class="btn-secondary" id="finish-answer" disabled>답변 종료</button>
       <button class="btn-ghost" id="cancel-btn">중지</button>
+      <button class="btn-ghost" id="crisis-btn">🆘 막혔을 때</button>
     </div>
     <div id="rec-status" class="muted small"></div>
     <audio id="playback" controls style="display:none;width:100%"></audio>
-    <p class="muted small" id="attempt-count">같은 질문 시도: 0회</p>
-    <div class="notice small">세 번 모두 정확히 같은 문장을 외우려 하지 마세요. 키워드는 같아도 문장은 매번 달라져도 됩니다(이 앱은 실제 발화를 텍스트로 옮기지 않으므로, 문장이 똑같은지는 자동으로 판정하지 않습니다).</div>
+    <p class="muted small" id="attempt-count"></p>
+    <div class="notice small">문장을 외우기보다 <strong>핵심어와 사고 순서</strong>를 반복하세요. 녹음은 메모리에만 두고 새로고침하면 사라집니다.</div>
+    <div class="row-gap"><button class="btn-secondary" onclick="navigate('mock-eval')">자가진단 체크하기</button></div>
     <section class="ai-highlight-card compact-ai-card" aria-label="내 답변 AI 피드백">
       <div class="ai-highlight-icon" aria-hidden="true">✨</div>
-      <div class="ai-highlight-copy"><span class="ai-highlight-kicker">선택 기능 · 무료</span><h3>내 답변 AI 피드백</h3><p>연습한 답변을 직접 입력하면 AI가 답을 대신 써주지 않고 잘된 점 1개, 보완점 최대 2개, 꼬리질문을 제안합니다.</p></div>
+      <div class="ai-highlight-copy"><span class="ai-highlight-kicker">선택 기능 · API 없음</span><h3>내 답변 AI 피드백</h3><p>답변을 직접 입력하면 복사용 프롬프트를 만들어줍니다. AI는 모범답안을 대신 쓰지 않고 보완점과 꼬리질문을 제안합니다.</p></div>
       <button class="btn-ai-strong" onclick="navigateAiMode('feedback')">내 답변 점검</button>
     </section>
   </div>`);
 
+  const frameSelect = body.querySelector("#frame-select");
+  function attemptCount() { return Number(AppState.practiceStats?.[current.id]?.attempts || 0); }
+  function depthLabel(depth) { return (window.APP_DATA.sevenDirections || []).find((d) => d.id === depth)?.label || ""; }
   function renderFrame() {
+    if (!window.APP_DATA.answerFrames[frame]) frame = "activity";
+    frameSelect.value = frame;
     const f = window.APP_DATA.answerFrames[frame];
     body.querySelector("#frame-desc").textContent = f.desc;
-    const stepsBox = body.querySelector("#frame-steps");
-    stepsBox.innerHTML = "";
-    f.steps.forEach((s) => stepsBox.appendChild(el(`<div class="field"><span class="chip">${escapeHtml(s.label)}</span> <span class="muted small">${escapeHtml(s.hint)}</span></div>`)));
+    const stepsBox = body.querySelector("#frame-steps"); stepsBox.innerHTML = "";
+    f.steps.forEach((st) => stepsBox.appendChild(el(`<div class="frame-step"><span class="chip">${escapeHtml(st.label)}</span><span class="muted small">${escapeHtml(st.hint)}</span></div>`)));
   }
-  renderFrame();
-  body.querySelector("#frame-select").onchange = (e) => { frame = e.target.value; renderFrame(); };
-  body.querySelector("#random-btn").onclick = () => {
-    current = pool[Math.floor(Math.random() * pool.length)];
+  function renderQuestion() {
     body.querySelector("#cur-q").textContent = current.text;
-    body.querySelector("#attempt-count").textContent = `같은 질문 시도: ${currentAttemptCount()}회`;
-  };
+    frame = inferFrame(current); renderFrame();
+    const meta = body.querySelector("#question-meta"); meta.innerHTML = "";
+    if (current.priority) meta.appendChild(el(`<span class="priority-pill priority-${String(current.priority).toLowerCase()}">${escapeHtml(current.priority)}</span>`));
+    if (current.depth) meta.appendChild(el(`<span class="mini-tag">${escapeHtml(depthLabel(current.depth) || current.depth)}</span>`));
+    const vf = body.querySelector("#verify-focus");
+    if (current.verificationFocus) { vf.style.display="flex"; vf.innerHTML=`<strong>CHECK</strong><span>${escapeHtml(current.verificationFocus)}</span>`; }
+    else { vf.style.display="none"; vf.innerHTML=""; }
+    body.querySelector("#attempt-count").textContent = `이 질문 말하기 시도: ${attemptCount()}회`;
+    if (requestedActivityId) {
+      body.querySelector("#focus-title").textContent = current.activityTitle || "핵심활동";
+      body.querySelector("#focus-progress").textContent = `${currentIndex + 1} / ${pool.length}`;
+      body.querySelector("#prev-q").disabled = currentIndex <= 0;
+      body.querySelector("#next-q").disabled = currentIndex >= pool.length - 1;
+    }
+  }
+  renderQuestion();
+  frameSelect.onchange = (e) => { frame = e.target.value; renderFrame(); };
 
-  let trainer = null;
-  let trainingActive = false;
+  if (requestedActivityId) {
+    body.querySelector("#prev-q").onclick = () => { if (currentIndex > 0) { currentIndex--; current = pool[currentIndex]; renderQuestion(); } };
+    body.querySelector("#next-q").onclick = () => { if (currentIndex < pool.length - 1) { currentIndex++; current = pool[currentIndex]; renderQuestion(); } };
+  } else {
+    body.querySelector("#random-btn").onclick = () => { currentIndex = Math.floor(Math.random()*pool.length); current=pool[currentIndex]; renderQuestion(); };
+  }
+
+  function openCrisisModal() {
+    const modal = el(`<div class="modal-backdrop"><div class="modal card"><h2>막혔을 때 — 위기 대처</h2><p class="muted small">실제 면접처럼 타이머는 멈추지 않습니다. 5~10초 핵심어를 정리한 뒤 아래 대처 문장을 한 번 소리 내어 말하고 답변을 이어가세요. 아는 범위를 구분하고 지어내지 않는 것이 먼저입니다.</p><div class="stack crisis-mini-list">${window.APP_DATA.crisisCards.slice(0,6).map((c)=>`<div class="card"><strong>${escapeHtml(c.situation)}</strong><p>${escapeHtml(c.line)}</p></div>`).join("")}</div><div class="modal-actions"><button class="btn-primary">연습으로 돌아가기</button></div></div></div>`);
+    modal.querySelector("button").onclick=()=>modal.remove(); document.body.appendChild(modal);
+  }
+  body.querySelector("#crisis-btn").onclick = openCrisisModal;
+
+  let trainer = null, trainingActive = false, playbackUrl = null;
   const setTrainingLocked = (locked) => {
     trainingActive = locked;
-    body.querySelector("#start30").disabled = locked;
-    body.querySelector("#start60").disabled = locked;
-    body.querySelector("#random-btn").disabled = locked;
-    body.querySelector("#frame-select").disabled = locked;
+    ["#start30","#start60","#start90"].forEach((id)=>body.querySelector(id).disabled=locked);
+    if (!locked) body.querySelector("#finish-answer").disabled = true;
+    const rnd=body.querySelector("#random-btn"); if(rnd) rnd.disabled=locked;
+    const prev=body.querySelector("#prev-q"); if(prev) prev.disabled=locked || currentIndex<=0;
+    const next=body.querySelector("#next-q"); if(next) next.disabled=locked || currentIndex>=pool.length-1;
+    frameSelect.disabled=locked;
   };
-  // 중요: getUserMedia는 버튼 클릭 이벤트의 첫 비동기 동작으로 바로 호출합니다.
-  // 준비시간 타이머를 먼저 기다린 뒤에 마이크를 요청하면 iOS Safari 등에서
-  // "사용자 제스처 직후"라는 조건이 깨져 권한 요청이 막힐 수 있습니다.
   async function runTraining(mainSeconds) {
-    if (trainingActive) return;
+    if (trainingActive || current.id === "empty") return;
     setTrainingLocked(true);
     trainer = new SpeakingTrainer({
       onTick: (remaining) => { body.querySelector("#timer-display").textContent = remaining + "s"; },
-      onPhaseChange: (phase, seconds) => { body.querySelector("#phase-label").textContent = phase; body.querySelector("#timer-display").textContent = seconds + "s"; },
-      onRecordingBlob: (blob) => {
-        const url = URL.createObjectURL(blob);
-        const audio = body.querySelector("#playback");
-        audio.src = url; audio.style.display = "block";
+      onPhaseChange: (phase, seconds) => {
+        body.querySelector("#phase-label").textContent=phase; body.querySelector("#timer-display").textContent=seconds+"s";
+        body.querySelector("#finish-answer").disabled = !String(phase || "").includes("답변");
       },
-      onFallback: (msg) => { body.querySelector("#rec-status").textContent = msg; },
+      onRecordingBlob: (blob) => {
+        if (playbackUrl) URL.revokeObjectURL(playbackUrl);
+        playbackUrl = URL.createObjectURL(blob); const audio=body.querySelector("#playback"); audio.src=playbackUrl; audio.style.display="block";
+      },
+      onFallback: (msg) => { body.querySelector("#rec-status").textContent=msg; },
     });
-    const recorded = await trainer.acquireStream(); // ← 클릭 직후 즉시 호출 (제스처 보존)
+    const recorded = await trainer.acquireStream();
     if (trainer.cancelled) { trainer.releaseStream(); setTrainingLocked(false); return; }
     body.querySelector("#rec-status").textContent = recorded ? "마이크 확보됨. 준비시간 뒤 녹음이 시작됩니다." : "스톱워치 모드로 진행합니다.";
-
     try {
-      const prepSec = parseInt(body.querySelector("#prep-sec").value, 10) || 0;
-      if (prepSec > 0) {
-        const prepDone = await trainer.runPhase(prepSec, "준비 시간");
-        if (!prepDone) return;
-      }
-
-      let recordingStarted = false;
-      if (recorded) {
-        recordingStarted = trainer.beginRecording();
-        body.querySelector("#rec-status").textContent = recordingStarted
-          ? "녹음 중… (메모리에만 저장되며 새로고침 시 사라집니다)"
-          : "녹음 시작에 실패하여 스톱워치 모드로 진행합니다.";
-      }
-      const mainDone = await trainer.runPhase(mainSeconds, mainSeconds === 30 ? "30초 답변" : "60초 답변");
-      if (!mainDone) return;
-      trainer.stopRecording();
-      body.querySelector("#phase-label").textContent = "완료";
-      const key = questionKey();
-      const count = currentAttemptCount() + 1;
-      attemptsByQuestion.set(key, count);
-      body.querySelector("#attempt-count").textContent = `같은 질문 시도: ${count}회`;
-    } finally {
-      setTrainingLocked(false);
-    }
+      const prepSec = parseInt(body.querySelector("#prep-sec").value,10)||0;
+      if (prepSec>0 && !(await trainer.runPhase(prepSec,"준비 시간"))) return;
+      if (recorded) { const started=trainer.beginRecording(); body.querySelector("#rec-status").textContent=started?"녹음 중… (브라우저 메모리만 사용)":"녹음 시작에 실패하여 스톱워치로 진행합니다."; }
+      const answerStartedAt = Date.now();
+      if (!(await trainer.runPhase(mainSeconds, `${mainSeconds}초 답변`))) return;
+      const actualSeconds = Math.max(1, Math.min(mainSeconds, Math.round((Date.now() - answerStartedAt) / 1000)));
+      trainer.stopRecording(); body.querySelector("#phase-label").textContent="완료";
+      body.querySelector("#finish-answer").disabled = true;
+      markQuestionPractice(current.id, actualSeconds);
+      body.querySelector("#attempt-count").textContent=`이 질문 말하기 시도: ${attemptCount()}회 · 최근 ${actualSeconds}초`;
+    } finally { setTrainingLocked(false); }
   }
-  body.querySelector("#start30").onclick = () => runTraining(30);
-  body.querySelector("#start60").onclick = () => runTraining(60);
-  body.querySelector("#cancel-btn").onclick = () => { if (trainer) trainer.cancel(); body.querySelector("#phase-label").textContent = "중지됨"; setTrainingLocked(false); };
+  body.querySelector("#start30").onclick=()=>runTraining(30);
+  body.querySelector("#start60").onclick=()=>runTraining(60);
+  body.querySelector("#start90").onclick=()=>runTraining(90);
+  body.querySelector("#finish-answer").onclick=()=>{
+    if (!trainer) return;
+    const elapsed = trainer.completePhase();
+    if (elapsed !== null) { body.querySelector("#finish-answer").disabled = true; body.querySelector("#rec-status").textContent = "답변을 종료했습니다. 실제 답변시간을 기록합니다."; }
+  };
+  body.querySelector("#cancel-btn").onclick=()=>{ if(trainer) trainer.cancel(); body.querySelector("#phase-label").textContent="중지됨"; body.querySelector("#finish-answer").disabled=true; setTrainingLocked(false); };
+  setRouteCleanup(() => {
+    if (trainer) trainer.cancel();
+    if (playbackUrl) { try { URL.revokeObjectURL(playbackUrl); } catch(e) {} playbackUrl = null; }
+    document.querySelectorAll(".modal-backdrop").forEach((m)=>m.remove());
+  });
 
   body.appendChild(buildFlowNav("trainer"));
-  return screenShell("30초·60초 말하기 훈련", "키워드는 같아도 문장은 매번 달라져도 됩니다.", body);
+  return screenShell(requestedActivityId ? "핵심활동 연속 면접 훈련" : "말하기 훈련", requestedActivityId ? "같은 활동을 사실→동기→과정→역할→개념→한계→확장 순으로 파고듭니다." : "질문에 맞는 답변 틀을 골라 30·60·90초로 반복합니다.", body);
+});
+
+function getOrCreateReadinessPracticeQuestion(kind) {
+  const practiced = AppState.practiceStats || {};
+  const isDone = (q) => Number(practiced[q.id]?.attempts || 0) > 0;
+  const isConcept = (q) => q && (q.depth === "concept" || q.recommendedFrame === "concept" || /개념|원리|설명/.test(`${q.directionLabel || ""} ${q.text || ""}`));
+  let existing = AppState.questions.find((q) => !isDone(q) && (kind === "A" ? q.priority === "A" : isConcept(q)));
+  if (existing) return existing;
+  const data = AppState.aiResultSections || {};
+  let cand = null, meta = {};
+  if (kind === "A") {
+    cand = (data.priorityA || []).find((x) => x && x.question && !AppState.questions.some((q) => q.text === x.question));
+    if (cand) meta = { depth: cand.depth || "", recommendedFrame: cand.recommendedFrame || "", verificationFocus: cand.verificationFocus || "", evidenceText: cand.evidenceQuote || "", evidenceSection: cand.evidenceArea || "" };
+    if (!cand) {
+      for (const a of (data.activityInventory || []).filter((x) => x.importance === "A")) {
+        const q = (a.questions || []).find((x) => x.question && !AppState.questions.some((saved) => saved.text === x.question));
+        if (q) { cand = q; meta = { depth:q.depth||"", recommendedFrame:q.recommendedFrame||"", verificationFocus:q.verificationFocus||"", activityId:a.activityId||"", activityTitle:a.title||"", evidenceText:q.evidenceQuote||a.evidenceQuote||"", evidenceSection:q.evidenceArea||a.area||"" }; break; }
+      }
+    }
+  } else {
+    for (const a of (data.activityInventory || [])) {
+      const q = (a.questions || []).find((x) => (x.depth === "concept" || x.recommendedFrame === "concept" || /개념|원리/.test(x.type || "")) && x.question && !AppState.questions.some((saved) => saved.text === x.question));
+      if (q) { cand = q; meta = { depth:"concept", recommendedFrame:q.recommendedFrame||"concept", verificationFocus:q.verificationFocus||"", activityId:a.activityId||"", activityTitle:a.title||"", evidenceText:q.evidenceQuote||a.evidenceQuote||"", evidenceSection:q.evidenceArea||a.area||"" }; break; }
+    }
+  }
+  if (!cand || !cand.question) return null;
+  return pushAiQuestion(cand.question, kind === "A" ? "A" : null, meta);
+}
+
+// ── v6 준비 현황 — 점수 대신 완료 개수와 다음 행동 ────────────────────
+registerRoute("readiness", () => {
+  const rs = getReadinessSummary();
+  const uni = getActiveUniversity();
+  const body = el(`<div class="stack">
+    <div class="readiness-hero">
+      <span class="hero-kicker">SELF-INTERVIEW PROGRESS</span>
+      <h2>${escapeHtml(uni?.name || "지원 대학 미입력")} ${escapeHtml(uni?.major || "")}</h2>
+      <p>합격 가능성을 점수로 예측하지 않습니다. <strong>실제로 준비하고 말해본 항목 수</strong>만 보여줍니다.</p>
+    </div>
+    <div class="readiness-grid">
+      <div class="card readiness-item"><strong>${rs.hasAi ? "완료" : "미완료"}</strong><span>AI 전체분석</span></div>
+      <div class="card readiness-item"><strong>${rs.practicedA}/${rs.totalA}</strong><span>A급 질문 말하기</span></div>
+      <div class="card readiness-item"><strong>${rs.practicedConcept}/${rs.conceptTotal}</strong><span>개념 질문 말하기</span></div>
+      <div class="card readiness-item"><strong>${rs.weaknessDone}/${rs.weaknessTotal}</strong><span>약점 소명 완성</span></div>
+      <div class="card readiness-item"><strong>${rs.totalAttempts}</strong><span>총 말하기 시도</span></div>
+      <div class="card readiness-item"><strong>${rs.mmiCount}</strong><span>MMI 연습</span></div>
+    </div>
+    <div id="next-action" class="card next-action-card"></div>
+    <div class="card"><h3>안전 확인</h3><p>${rs.blindChecked ? "✅ 등록한 대학의 공식자료 확인 및 블라인드 정보 입력이 되어 있습니다." : "⚠️ 대학별 공식 모집요강과 블라인드 규정을 아직 확인 표시하지 않았습니다."}</p><button class="btn-ghost small" onclick="navigate('universities')">대학 정보 확인</button> <button class="btn-ghost small" onclick="navigate('blind-check')">답변 블라인드 점검</button></div>
+  </div>`);
+  const next = body.querySelector("#next-action");
+  let title="", desc="", route="student-dashboard", label="학생 홈";
+  if (!rs.hasAi) { title="1. 학생부 전체 분석부터"; desc="전체 활동을 찾고 질문을 만든 뒤 연습을 시작하세요."; route="student-dashboard"; label="분석 시작"; }
+  else if (rs.totalA > rs.practicedA) { title="2. A급 필수질문을 먼저 말해보기"; desc=`아직 말해보지 않은 A급 질문이 ${rs.totalA-rs.practicedA}개 있습니다.`; route="trainer"; label="A급 질문 연습"; }
+  else if (rs.conceptTotal > rs.practicedConcept) { title="3. 개념 CHECK 보강"; desc="학생부에 적힌 개념·원리를 자기 말로 설명하는 연습을 우선하세요."; route="trainer"; label="개념 질문 연습"; }
+  else if (rs.weaknessTotal > rs.weaknessDone) { title="4. 설명 필요한 기록 정리"; desc="사실 인정 → 원인 → 바꾼 노력 → 현재 변화 순으로 소명합니다."; route="weakness"; label="약점 소명"; }
+  else { title="5. 실전 반복"; desc="준비한 질문을 랜덤으로 말하고 자가진단에서 고칠 점을 최대 2개만 정하세요."; route="trainer"; label="실전 연습"; }
+  next.innerHTML=`<span class="hero-kicker">다음 추천</span><h3>${escapeHtml(title)}</h3><p>${escapeHtml(desc)}</p><button class="btn-primary">${escapeHtml(label)}</button>`;
+  next.querySelector("button").onclick=()=>{
+    if (label === "A급 질문 연습") {
+      const q = getOrCreateReadinessPracticeQuestion("A");
+      if (q) navigate("trainer", { qid:q.id }); else { toast("AI 분석 결과에서 연습할 A급 질문을 찾지 못했습니다. 분석 결과를 다시 확인하세요."); navigate("ai-results"); }
+      return;
+    }
+    if (label === "개념 질문 연습") {
+      const q = getOrCreateReadinessPracticeQuestion("concept");
+      if (q) navigate("trainer", { qid:q.id }); else { toast("AI 분석 결과에서 개념 질문을 찾지 못했습니다. 분석 결과를 다시 확인하세요."); navigate("ai-results"); }
+      return;
+    }
+    navigate(route);
+  };
+  body.appendChild(buildFlowNav("readiness"));
+  return screenShell("면접 준비 현황", "점수보다 실제 연습 완료 정도를 확인합니다.", body);
 });
 
 // ── STEP10 모의면접 자가평가 (§30, 보완: 실제 상태 저장) ───────────────
@@ -1372,7 +1567,7 @@ registerRoute("mock-eval", () => {
   body.appendChild(goodTa); body.appendChild(fixTa);
   body.appendChild(el(`<button class="btn-primary" onclick="navigate('print-sheet')">저장하고 인쇄용으로 이동</button>`));
   body.appendChild(buildFlowNav("mock-eval"));
-  return screenShell("모의면접 자가평가", "체크와 메모는 자동으로 저장됩니다. 피드백은 잘한 점 1개 + 고칠 점 최대 2개까지만.", body);
+  return screenShell("모의면접 자가평가", "체크와 메모는 현재 세션에 반영되며 새로고침하면 사라집니다. 피드백은 잘한 점 1개 + 고칠 점 최대 2개까지만.", body);
 });
 
 // ── 블라인드 위험표현 점검 (§31) ──────────────────────────────────────
@@ -1434,60 +1629,118 @@ registerRoute("common12", () => {
     const id = card.dataset.id;
     card.querySelector("textarea").addEventListener("input", (e) => { AppState.commonAnswers[id] = e.target.value; });
   });
-  return screenShell("빈출 공통질문 12유형", "문장이 아니라 키워드로 적습니다(자동 저장됩니다). 자기소개·마지막 할 말은 묻지 않는 대학도 많습니다.", body);
+  return screenShell("빈출 공통질문 12유형", "문장이 아니라 키워드로 적습니다. 현재 세션에 반영되며 새로고침하면 사라집니다. 자기소개·마지막 할 말은 묻지 않는 대학도 많습니다.", body);
 });
 
-// ── 특수 면접 / 제시문 모드 (§34) ─────────────────────────────────────
-registerRoute("special-track", () => {
+// ── v6 특수 면접 / 제시문 / MMI 훈련 ─────────────────────────────────
+registerRoute("special-track", (params) => {
   const uni = getActiveUniversity();
   const trackId = uni?.specialTrack && uni.specialTrack !== "none" ? uni.specialTrack : null;
-  const body = el(`<div class="stack"></div>`);
   const effectiveType = effectiveInterviewType(uni);
-  if (effectiveType === "제시문 기반") {
-    body.appendChild(el(`<div class="notice">${escapeHtml(window.APP_DATA.presentationModeNote)}</div>`));
-    body.appendChild(el(`<label class="field"><span>내가 찾은 기출 제시문 붙여넣기</span><textarea rows="6" id="prompt-paste"></textarea></label>`));
-    body.appendChild(el(`<label class="field"><span>준비시간(초)</span><input type="number" id="prep-timer-sec" value="600"></label>`));
-    const timerDisplay = el(`<div class="timer-display" id="prompt-timer">--</div>`);
-    body.appendChild(timerDisplay);
-    const startBtn = el(`<button class="btn-primary">준비시간 타이머 시작</button>`);
-    let iv = null;
-    startBtn.onclick = () => {
-      let remain = parseInt(body.querySelector("#prep-timer-sec").value, 10) || 0;
-      clearInterval(iv);
-      iv = setInterval(() => { remain--; timerDisplay.textContent = remain + "s"; if (remain <= 0) clearInterval(iv); }, 1000);
-    };
-    body.appendChild(startBtn);
-    body.appendChild(el(`<div class="card"><h3>제시문 메모 3단계</h3>
+  let mode = params?.mode || (effectiveType === "다중 미니(MMI)" ? "mmi" : effectiveType === "제시문 기반" ? "prompt" : "guide");
+  let modeCleanup = () => {};
+  const body = el(`<div class="stack">
+    <div class="mode-tabs">
+      <button class="btn-ghost small" data-mode="prompt">제시문 훈련</button>
+      <button class="btn-ghost small" data-mode="mmi">MMI 훈련</button>
+      <button class="btn-ghost small" data-mode="guide">계열별 가이드</button>
+    </div>
+    <div id="special-mount" class="stack"></div>
+  </div>`);
+  const mount = body.querySelector("#special-mount");
+
+  function drawPromptMode() {
+    mount.innerHTML = "";
+    mount.appendChild(el(`<div class="notice">${escapeHtml(window.APP_DATA.presentationModeNote)}</div>`));
+    mount.appendChild(el(`<label class="field"><span>내가 공식자료에서 찾은 제시문/질문 붙여넣기</span><textarea rows="6" id="prompt-paste" placeholder="대학 입학처·선행학습 영향평가 등에서 직접 확인한 자료를 사용하세요."></textarea></label>`));
+    const timer = el(`<div class="card"><div class="grid-2"><label class="field"><span>준비시간(초)</span><input type="number" id="prep-timer-sec" value="600" min="0"></label><div class="timer-box"><div class="phase-label">준비시간</div><div class="timer-display" id="prompt-timer">--</div></div></div><div class="row-gap"><button class="btn-primary" id="prompt-start">타이머 시작</button><button class="btn-ghost" id="prompt-stop">중지</button></div></div>`);
+    mount.appendChild(timer);
+    let iv=null;
+    timer.querySelector("#prompt-start").onclick=()=>{ let remain=parseInt(timer.querySelector("#prep-timer-sec").value,10)||0; clearInterval(iv); timer.querySelector("#prompt-timer").textContent=remain+"s"; iv=setInterval(()=>{remain--;timer.querySelector("#prompt-timer").textContent=Math.max(0,remain)+"s";if(remain<=0){clearInterval(iv);iv=null;}},1000); };
+    timer.querySelector("#prompt-stop").onclick=()=>{clearInterval(iv);iv=null;};
+    modeCleanup=()=>{ if(iv){clearInterval(iv);iv=null;} };
+    mount.appendChild(el(`<div class="card"><h3>제시문 메모 3단계</h3>
       <label class="field"><span>① 비교 · 무엇이 같고 다른가</span><textarea rows="2" placeholder="공통점/차이점 키워드"></textarea></label>
-      <label class="field"><span>② 적용 · 제시문의 관점을 새 상황에 적용</span><textarea rows="2" placeholder="어떤 기준을 어디에 적용할지"></textarea></label>
-      <label class="field"><span>③ 확장 · 한계·반론·새로운 맥락</span><textarea rows="2" placeholder="반론, 한계, 추가 조건"></textarea></label>
-      <p class="muted small">문장을 완성해서 외우기보다 준비실에서 쓸 키워드 메모처럼 적어보세요.</p>
-    </div>`));
+      <label class="field"><span>② 적용 · 관점/원칙을 새 상황에 적용</span><textarea rows="2" placeholder="어떤 기준을 어디에 적용할지"></textarea></label>
+      <label class="field"><span>③ 확장 · 한계·반론·새 조건</span><textarea rows="2" placeholder="반론, 한계, 추가 조건"></textarea></label>
+      <p class="muted small">완성 문장을 외우지 말고 준비실에서 사용할 핵심어만 적어보세요.</p></div>`));
   }
-  const trackData = trackId ? window.APP_DATA.specialTrackQuestions[trackId] : null;
-  if (trackData) {
-    body.appendChild(el(`<div class="card"><h3>${escapeHtml(trackData.label)}</h3>
-      <p class="muted small">프레임: ${trackData.framework.join(" · ")}</p>
-      <ul>${trackData.samples.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>
-      <p class="notice small">대학별 실제 문항을 이 앱이 임의로 만들지 않습니다. 예시일 뿐입니다.</p>
-    </div>`));
-  } else if (effectiveType !== "제시문 기반" && effectiveType !== "다중 미니(MMI)") {
-    body.appendChild(el(`<p class="muted">해당 계열이 지정되지 않았습니다(기본값은 "해당 없음"). 유형 판별 화면에서 계열 태그를 지정하세요.</p>`));
+
+  function drawMmiMode() {
+    mount.innerHTML = "";
+    const f = window.APP_DATA.answerFrames.mmi;
+    mount.appendChild(el(`<div class="notice"><strong>MMI 훈련 원칙</strong><br>여기 제시되는 압박질문은 실제 기출이 아니라 <strong>후속질문 패턴 훈련용</strong>입니다. 대학별 준비·면접 시간은 모집요강을 우선합니다.</div>`));
+    mount.appendChild(el(`<label class="field"><span>연습할 상황/제시문</span><textarea rows="5" id="mmi-situation" placeholder="직접 찾은 공식 제시문 또는 교사가 만든 연습 상황을 붙여넣으세요."></textarea></label>`));
+    const frameCard=el(`<div class="card"><h3>${escapeHtml(f.label)}</h3><p class="muted small">${escapeHtml(f.desc)}</p><div class="stack">${f.steps.map((st)=>`<label class="field"><span>${escapeHtml(st.label)}</span><textarea rows="2" placeholder="${escapeHtml(st.hint)}"></textarea></label>`).join("")}</div></div>`);
+    mount.appendChild(frameCard);
+    const timing=el(`<div class="card"><h3>시간 압박 훈련</h3><div class="grid-2"><label class="field"><span>제시문 숙지(초)</span><input id="mmi-prep" type="number" min="0" value="120"></label><label class="field"><span>첫 답변(초)</span><input id="mmi-answer" type="number" min="30" value="180"></label></div><div class="timer-box"><div id="mmi-phase" class="phase-label">대기 중</div><div id="mmi-clock" class="timer-display">--</div></div><div class="row-gap"><button class="btn-primary" id="mmi-start">숙지→답변 연속 시작</button><button class="btn-secondary" id="mmi-finish" disabled>답변 종료</button><button class="btn-ghost" id="mmi-cancel">중지</button></div><div id="mmi-rec-status" class="muted small"></div><audio id="mmi-playback" controls style="display:none;width:100%"></audio></div>`);
+    mount.appendChild(timing);
+    let mmiTrainer=null, pbUrl=null, mmiAnswerCompleted=false;
+    timing.querySelector("#mmi-start").onclick=async()=>{
+      if(mmiTrainer) mmiTrainer.cancel();
+      mmiTrainer=new SpeakingTrainer({
+        onTick:(r)=>timing.querySelector("#mmi-clock").textContent=r+"s",
+        onPhaseChange:(ph,sec)=>{timing.querySelector("#mmi-phase").textContent=ph;timing.querySelector("#mmi-clock").textContent=sec+"s";timing.querySelector("#mmi-finish").disabled=!String(ph||"").includes("답변");},
+        onRecordingBlob:(blob)=>{if(pbUrl)URL.revokeObjectURL(pbUrl);pbUrl=URL.createObjectURL(blob);const a=timing.querySelector("#mmi-playback");a.src=pbUrl;a.style.display="block";},
+        onFallback:(msg)=>timing.querySelector("#mmi-rec-status").textContent=msg,
+      });
+      const recorded=await mmiTrainer.acquireStream();
+      const prep=parseInt(timing.querySelector("#mmi-prep").value,10)||0;
+      const answer=parseInt(timing.querySelector("#mmi-answer").value,10)||180;
+      if(prep>0 && !(await mmiTrainer.runPhase(prep,"제시문 숙지"))) return;
+      if(recorded) mmiTrainer.beginRecording();
+      if(!(await mmiTrainer.runPhase(answer,"첫 답변"))) return;
+      mmiTrainer.stopRecording(); timing.querySelector("#mmi-phase").textContent="첫 답변 완료"; timing.querySelector("#mmi-finish").disabled=true;
+      mmiAnswerCompleted=true; finish.disabled=false;
+    };
+    timing.querySelector("#mmi-finish").onclick=()=>{ if(mmiTrainer) mmiTrainer.completePhase(); timing.querySelector("#mmi-finish").disabled=true; };
+    timing.querySelector("#mmi-cancel").onclick=()=>{if(mmiTrainer)mmiTrainer.cancel();timing.querySelector("#mmi-phase").textContent="중지됨";timing.querySelector("#mmi-finish").disabled=true;};
+
+    const patterns=el(`<section class="mmi-pattern-section"><div class="section-head"><div><h2>압박·꼬리질문 패턴</h2></div><span class="rank-badge">${window.APP_DATA.mmiFollowUpPatterns.length}개</span></div><p class="muted small">첫 답변 뒤 임의의 패턴 하나를 골라 다시 60초로 답해보세요.</p><div class="stack" id="mmi-pattern-list"></div></section>`);
+    window.APP_DATA.mmiFollowUpPatterns.forEach((pat)=>{
+      const c=el(`<div class="card mmi-pattern-card"><div class="row-between"><strong>${escapeHtml(pat.label)}</strong><span class="mini-tag">훈련 패턴</span></div><p>${escapeHtml(pat.prompt)}</p><p class="muted small">점검: ${escapeHtml(pat.check)}</p><button class="btn-secondary small">이 꼬리질문 60초 연습</button></div>`);
+      c.querySelector("button").onclick=()=>{
+        const q=pushAiQuestion(pat.prompt,null,{recommendedFrame:"mmi",depth:"limit",verificationFocus:pat.check,activityId:"mmi-practice",activityTitle:"MMI 압박질문"});
+        navigate("trainer",{qid:q.id,activityId:"mmi-practice"});
+      };
+      patterns.querySelector("#mmi-pattern-list").appendChild(c);
+    });
+    mount.appendChild(patterns);
+    const finish=el(`<button class="btn-primary big" disabled>이 MMI 방 완료 · 다음 방으로 리셋</button>`);
+    finish.onclick=()=>{
+      if (!mmiAnswerCompleted) { toast("첫 답변을 한 번 완료한 뒤 방 완료를 기록할 수 있습니다."); return; }
+      AppState.mmiPracticeCount=Number(AppState.mmiPracticeCount||0)+1;
+      toast(`MMI 연습 ${AppState.mmiPracticeCount}회 완료. 이전 답변을 끌고 가지 말고 다음 방을 새로 시작하세요.`);
+      if(mmiTrainer) mmiTrainer.cancel();
+      if(pbUrl){try{URL.revokeObjectURL(pbUrl);}catch(e){} pbUrl=null;}
+      const audio=timing.querySelector("#mmi-playback"); audio.removeAttribute("src"); audio.style.display="none";
+      frameCard.querySelectorAll("textarea").forEach((t)=>t.value="");
+      mount.querySelector("#mmi-situation").value="";
+      timing.querySelector("#mmi-phase").textContent="대기 중"; timing.querySelector("#mmi-clock").textContent="--"; timing.querySelector("#mmi-rec-status").textContent="";
+      mmiAnswerCompleted=false; finish.disabled=true; timing.querySelector("#mmi-finish").disabled=true;
+    };
+    mount.appendChild(finish);
+    modeCleanup=()=>{ if(mmiTrainer) mmiTrainer.cancel(); if(pbUrl){try{URL.revokeObjectURL(pbUrl);}catch(e){} pbUrl=null;} };
   }
-  if (effectiveType === "집단·토론") {
-    body.appendChild(el(`<div class="notice">${escapeHtml(window.APP_DATA.groupDiscussionNote)}</div>`));
+
+  function drawGuideMode() {
+    mount.innerHTML="";
+    if (effectiveType === "집단·토론") mount.appendChild(el(`<div class="notice">${escapeHtml(window.APP_DATA.groupDiscussionNote)}</div>`));
+    const trackData=trackId?window.APP_DATA.specialTrackQuestions[trackId]:null;
+    if(trackData) mount.appendChild(el(`<div class="card"><h3>${escapeHtml(trackData.label)}</h3><p class="muted small">프레임: ${trackData.framework.join(" · ")}</p><ul>${trackData.samples.map((x)=>`<li>${escapeHtml(x)}</li>`).join("")}</ul><p class="notice small">실제 기출이 아니라 질문 유형 예시입니다. 대학별 공식자료를 별도로 확인하세요.</p></div>`));
+    else mount.appendChild(el(`<div class="card"><h3>계열별 가이드</h3><p class="muted">등록된 특수계열이 없습니다. 대학 정보에서 간호·보건 / 교대·사범 / 군·경찰 / 신학 계열 태그를 지정하거나 위 탭에서 제시문·MMI를 바로 연습하세요.</p></div>`));
   }
-  if (effectiveType === "다중 미니(MMI)") {
-    body.appendChild(el(`<div class="card"><h3>MMI 방 이동 훈련</h3>
-      <p class="muted small">각 방은 새 평가라고 생각하고 이전 방의 실수를 다음 방으로 끌고 가지 않는 연습을 합니다.</p>
-      <label class="field"><span>문 앞 준비 · 상황의 핵심</span><textarea rows="2" placeholder="누가, 어떤 문제에 놓였는가"></textarea></label>
-      <label class="field"><span>내 판단</span><textarea rows="2" placeholder="먼저 무엇을 하겠는가"></textarea></label>
-      <label class="field"><span>판단 근거와 상대 관점</span><textarea rows="2" placeholder="왜 그렇게 판단했는가 / 상대는 어떻게 볼 수 있는가"></textarea></label>
-      <label class="field checkbox"><input type="checkbox"> 이 방을 마치고 5초 안에 리셋하고 다음 방으로 넘어가는 연습을 했다</label>
-    </div>`));
+
+  function draw(){
+    modeCleanup(); modeCleanup = () => {};
+    body.querySelectorAll("[data-mode]").forEach((b)=>b.className=b.dataset.mode===mode?"btn-primary small":"btn-ghost small");
+    if(mode==="mmi") drawMmiMode(); else if(mode==="prompt") drawPromptMode(); else drawGuideMode();
   }
+  body.querySelectorAll("[data-mode]").forEach((b)=>b.onclick=()=>{mode=b.dataset.mode;draw();});
+  draw();
+  setRouteCleanup(() => modeCleanup());
   body.appendChild(el(`<button class="btn-ghost" onclick="navigate('student-dashboard')">학생 홈으로</button>`));
-  return screenShell("특수 면접 / 제시문 대비", "해당하는 학생에게만 필요한 화면입니다.", body);
+  return screenShell("제시문·MMI·특수계열 훈련", "대학별 실제 운영방식은 모집요강을 우선하고, 이 화면은 사고과정과 시간압박을 연습합니다.", body);
 });
 
 // ── 면접 직전 모드 / 인쇄 한 장 (§35, §36) ────────────────────────────
@@ -1598,6 +1851,7 @@ registerRoute("data-io", () => {
     <label class="field checkbox"><input type="checkbox" id="opt-q" checked> 질문·우선순위</label>
     <label class="field checkbox"><input type="checkbox" id="opt-log" checked> 면접 후기</label>
     <label class="field checkbox"><input type="checkbox" id="opt-weak" checked> 설명이 필요한 기록</label>
+    <label class="field checkbox"><input type="checkbox" id="opt-notes" checked> 기타 면접 준비 메모·자가평가·연습기록 (지원동기·빈출질문 메모·연습횟수 등)</label>
     <label class="field checkbox"><input type="checkbox" id="opt-evidence"> 질문의 학생부 근거 문장까지 포함 (기본 해제 — 세특 등 학생부 실제 문장이 그대로 담깁니다)</label>
     <button class="btn-primary" id="export-btn">내 준비 데이터 저장 (JSON)</button>
     <hr class="divider">
@@ -1612,13 +1866,15 @@ registerRoute("data-io", () => {
       includeQuestions: body.querySelector("#opt-q").checked,
       includeLogs: body.querySelector("#opt-log").checked,
       includeWeakness: body.querySelector("#opt-weak").checked,
+      includePreparationNotes: body.querySelector("#opt-notes").checked,
       includeEvidence: body.querySelector("#opt-evidence").checked,
     });
   };
   body.querySelector("#import-file").addEventListener("change", async (e) => {
     const file = e.target.files[0]; if (!file) return;
     const text = await file.text();
-    const result = importStateFromJson(text);
+    if (!confirm("불러오면 현재 세션의 대학·활동·질문·메모를 모두 지우고 이 백업으로 복원합니다. 계속할까요?")) { e.target.value=""; return; }
+    const result = importStateFromJson(text, { reset:true });
     body.querySelector("#import-status").textContent = result.ok ? "불러오기 완료." : result.reason;
     if (result.ok) toast("데이터를 불러왔습니다.");
   });

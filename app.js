@@ -31,6 +31,8 @@ const AppState = {
   aiVerificationNotes: [], // AI가 "학생이 직접 확인해야 할 내용"으로 표시한 것 중 채택된 항목
   analysisResult: null,    // 자동 면접 분석 결과(핵심기록/질문/설명필요 등)
   analysisUpdatedAt: null, // 마지막 자동분석 시각
+  practiceStats: {},      // { [questionId]: { attempts, lastSeconds, lastAt } } — 세션 내 진행 현황
+  mmiPracticeCount: 0,    // 세션 내 MMI 연습 횟수
 };
 
 function saveLocalSetting(key, value) {
@@ -101,6 +103,8 @@ function findPiiCandidates(text) {
     { label: "학교명으로 보이는 표현(○○고/중/초)", re: /[가-힣A-Za-z0-9]+(고등학교|중학교|초등학교|고교)/g },
     { label: "숫자로 된 등급/석차 표현", re: /(전교\s?\d+\s?등|\d\s?등급)/g },
     { label: "생년월일로 보이는 표현", re: /(19|20)\d{2}[.\-/]\s?(0?[1-9]|1[0-2])[.\-/]\s?(0?[1-9]|[12]\d|3[01])/g },
+    { label: "학번으로 보이는 표현", re: /(?:학번|번호)\s*[:：]?\s*\d{3,8}/g },
+    { label: "이름으로 보이는 항목", re: /(?:성명|이름)\s*[:：]?\s*[가-힣]{2,4}/g },
   ];
   patterns.forEach((p) => {
     const m = text.match(p.re);
@@ -109,9 +113,86 @@ function findPiiCandidates(text) {
   return Array.from(hits);
 }
 
+
+function maskPiiCandidates(text) {
+  return String(text || "")
+    .replace(/01[0-9][-\s]?\d{3,4}[-\s]?\d{4}/g, "[전화번호]")
+    .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[이메일]")
+    .replace(/[가-힣A-Za-z0-9]+(?:고등학교|중학교|초등학교|고교)/g, "[학교명]")
+    .replace(/(19|20)\d{2}[.\-/]\s?(0?[1-9]|1[0-2])[.\-/]\s?(0?[1-9]|[12]\d|3[01])/g, "[생년월일]")
+    .replace(/((?:학번|번호)\s*[:：]?\s*)\d{3,8}/g, "$1[학번]")
+    .replace(/((?:성명|이름)\s*[:：]?\s*)[가-힣]{2,4}/g, "$1[이름]");
+}
+
+function hasVolatilePreparationData() {
+  const mock = AppState.mockEvaluation || { checks: {}, good: "", fix: "" };
+  return Boolean(
+    String(AppState.recordRawText || "").trim() ||
+    (AppState.universities || []).length ||
+    (AppState.records || []).length ||
+    (AppState.activities || []).length ||
+    (AppState.questions || []).length ||
+    (AppState.weaknessEntries || []).length ||
+    (AppState.interviewLogs || []).length ||
+    AppState.aiResultSections || AppState.aiDeepResult || AppState.analysisResult ||
+    (AppState.aiVerificationNotes || []).length ||
+    Object.keys(AppState.commonAnswers || {}).some((k) => String(AppState.commonAnswers[k] || "").trim()) ||
+    Object.keys(AppState.practiceStats || {}).length || Number(AppState.mmiPracticeCount || 0) > 0 ||
+    Object.values(mock.checks || {}).some(Boolean) || String(mock.good || "").trim() || String(mock.fix || "").trim() ||
+    String(AppState.introKeywords || "").trim() || String(AppState.lastWord || "").trim() ||
+    String(AppState.motiveMoment || "").trim() || (AppState.motiveActions || []).length ||
+    String(AppState.majorCourses || "").trim() || String(AppState.majorSourceLog || "").trim() ||
+    String(AppState.favoriteCourseWhy || "").trim() || String(AppState.afterAdmission || "").trim() ||
+    String(AppState.motiveOneLine || "").trim()
+  );
+}
+
+// ── v6 준비 현황 — 인위적인 점수 대신 "준비된 개수"를 보여줍니다 ──────────
+function getReadinessSummary() {
+  const questions = AppState.questions || [];
+  const aiData = AppState.aiResultSections || null;
+  const inventory = aiData?.activityInventory || [];
+  const aActivities = inventory.filter((a) => a.importance === "A");
+  const conceptQuestions = questions.filter((q) => q.depth === "concept" || q.recommendedFrame === "concept" || /개념|원리|설명/.test(q.directionLabel || ""));
+  const aiConceptTotal = inventory.reduce((sum,a) => sum + (a.questions || []).filter((q) => q.depth === "concept" || q.recommendedFrame === "concept" || /개념|원리/.test(q.type || "")).length, 0);
+  const practicedIds = new Set(Object.entries(AppState.practiceStats || {}).filter(([,v]) => Number(v?.attempts || 0) > 0).map(([k]) => k));
+  const practicedA = questions.filter((q) => q.priority === "A" && practicedIds.has(q.id)).length;
+  const totalA = Math.max((aiData?.priorityA || []).length, questions.filter((q) => q.priority === "A").length);
+  const practicedConcept = conceptQuestions.filter((q) => practicedIds.has(q.id)).length;
+  const weaknessDone = (AppState.weaknessEntries || []).filter((w) => [w.accept,w.cause,w.effort,w.result].every((x) => String(x||"").trim())).length;
+  return {
+    hasAi: !!aiData,
+    inventoryCount: inventory.length,
+    aActivityCount: aActivities.length,
+    totalA, practicedA,
+    conceptTotal: Math.max(aiConceptTotal, conceptQuestions.length), practicedConcept,
+    weaknessTotal: (AppState.weaknessEntries || []).length, weaknessDone,
+    totalAttempts: Object.values(AppState.practiceStats || {}).reduce((sum,v) => sum + Number(v?.attempts || 0), 0),
+    mmiCount: Number(AppState.mmiPracticeCount || 0),
+    blindChecked: !!getActiveUniversity()?.officialChecked && getActiveUniversity()?.blind !== "미확인",
+  };
+}
+
+function markQuestionPractice(questionId, seconds) {
+  if (!questionId) return;
+  const prev = AppState.practiceStats[questionId] || { attempts: 0 };
+  AppState.practiceStats[questionId] = {
+    attempts: Number(prev.attempts || 0) + 1,
+    lastSeconds: Number(seconds || 0),
+    lastAt: new Date().toISOString(),
+  };
+}
+
 // ── 라우터 (해시 기반, 빌드 과정 없는 정적 SPA) ─────────────────────────
 const routes = {};
+let activeRouteCleanup = null;
 function registerRoute(name, renderFn) { routes[name] = renderFn; }
+function setRouteCleanup(fn) { activeRouteCleanup = typeof fn === "function" ? fn : null; }
+function runRouteCleanup() {
+  if (!activeRouteCleanup) return;
+  const fn = activeRouteCleanup; activeRouteCleanup = null;
+  try { fn(); } catch (err) { console.warn("route cleanup failed:", err); }
+}
 
 function navigate(name, params) {
   location.hash = "#/" + name + (params ? "?" + new URLSearchParams(params).toString() : "");
@@ -149,6 +230,7 @@ function renderRoute() {
   const view = document.getElementById("view");
   const fn = routes[name] || routes["home"];
   try {
+    runRouteCleanup();
     view.innerHTML = "";
     view.appendChild(fn(params));
   } catch (err) {
@@ -296,4 +378,12 @@ function purgeAllRecordData() {
   AppState.questions = AppState.questions.filter((q) => !recordIds.has(q.recordId));
   toast("학생부에서 가져온 원문·기록·관련 질문을 모두 삭제했습니다.");
 }
-window.addEventListener("beforeunload", () => { AppState.recordRawText = ""; AppState.aiResultRaw = ""; });
+window.addEventListener("beforeunload", (e) => {
+  // 경고창에서 사용자가 '머무르기'를 선택할 수도 있으므로 여기서 상태를 지우거나
+  // 녹음을 강제 종료하지 않습니다. 실제 페이지 이탈 시 브라우저가 메모리/미디어를 정리합니다.
+  if (hasVolatilePreparationData()) {
+    e.preventDefault();
+    e.returnValue = ""; // 지원 브라우저는 자체 이탈 경고 문구를 표시합니다.
+  }
+});
+window.addEventListener("pagehide", () => runRouteCleanup());

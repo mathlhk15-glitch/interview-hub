@@ -13,8 +13,8 @@ window.APP_CONFIG = {
   SCHOOL_LABEL: "",
 
   // 앱 표시 이름
-  APP_NAME: "2027 대입 면접 준비 허브",
+  APP_NAME: "2027 대입 면접 셀프 트레이너",
 
   // 배포 버전
-  APP_VERSION: "5.1-ai-first-clean",
+  APP_VERSION: "6.1-reviewed-self-interview-trainer",
 };

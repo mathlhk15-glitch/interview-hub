@@ -88,13 +88,18 @@ function normalizeCoreActivity(item) {
 }
 
 function normalizeQuestion(item) {
-  if (typeof item === "string") return { question: item.trim(), evidenceArea: "", evidenceQuote: "", evaluationPoint: "" };
+  if (typeof item === "string") return { question: item.trim(), evidenceArea: "", evidenceQuote: "", evaluationPoint: "", depth: "", recommendedFrame: "", verificationFocus: "", activityId: "" };
   const o = item && typeof item === "object" ? item : {};
+  const frame = firstText(o, ["recommendedFrame", "frame", "answerFrame"]).toLowerCase();
   return {
     question: firstText(o, ["question", "text", "content", "title"]),
     evidenceArea: firstText(o, ["evidenceArea", "area", "section", "source"]),
     evidenceQuote: firstText(o, ["evidenceQuote", "evidence", "quote", "sourceText"]),
     evaluationPoint: firstText(o, ["evaluationPoint", "intent", "point", "reason"]),
+    depth: firstText(o, ["depth", "questionDepth", "level"]).toLowerCase(),
+    recommendedFrame: ["activity", "star", "oreo", "concept", "mmi"].includes(frame) ? frame : "",
+    verificationFocus: firstText(o, ["verificationFocus", "studentCheck", "check", "verify"]),
+    activityId: firstText(o, ["activityId", "activityID"]),
   };
 }
 
@@ -172,18 +177,22 @@ function cleanObjects(list, normalizer, key) {
 
 
 function normalizeActivityQuestion(item) {
-  if (typeof item === "string") return { type: "", question: item.trim(), evaluationPoint: "" };
+  if (typeof item === "string") return { type: "", depth: "", question: item.trim(), evaluationPoint: "", recommendedFrame: "", verificationFocus: "" };
   const o = item && typeof item === "object" ? item : {};
+  const frame = firstText(o, ["recommendedFrame", "frame", "answerFrame"]).toLowerCase();
   return {
     type: firstText(o, ["type", "kind", "direction", "category"]),
+    depth: firstText(o, ["depth", "questionDepth", "level"]).toLowerCase(),
     question: firstText(o, ["question", "text", "content", "title"]),
     evaluationPoint: firstText(o, ["evaluationPoint", "intent", "point", "reason"]),
+    recommendedFrame: ["activity", "star", "oreo", "concept", "mmi"].includes(frame) ? frame : "",
+    verificationFocus: firstText(o, ["verificationFocus", "studentCheck", "check", "verify"]),
   };
 }
 
 function normalizeActivityInventoryItem(item, idx) {
   if (typeof item === "string") {
-    return { activityId: `A${String(idx + 1).padStart(2, "0")}`, title: item.trim(), area: "", summary: item.trim(), evidenceQuote: "", tags: [], importance: "B", questions: [], followUpQuestions: [] };
+    return { activityId: `A${String(idx + 1).padStart(2, "0")}`, title: item.trim(), area: "", summary: item.trim(), evidenceQuote: "", tags: [], sourceConnections: [], importance: "B", questions: [], followUpQuestions: [] };
   }
   const o = item && typeof item === "object" ? item : {};
   const importanceRaw = firstText(o, ["importance", "priority", "grade"]).toUpperCase();
@@ -195,6 +204,7 @@ function normalizeActivityInventoryItem(item, idx) {
     summary: firstText(o, ["summary", "detail", "content", "text"]),
     evidenceQuote: firstText(o, ["evidenceQuote", "evidence", "quote", "sourceText"]),
     tags: asArray(o.tags || o.categories).map(toPlainText).filter(Boolean).slice(0, 6),
+    sourceConnections: asArray(o.sourceConnections || o.sourcesUsed || o.materialConnections).map(toPlainText).filter(Boolean).slice(0, 6),
     importance,
     questions: asArray(o.questions).map(normalizeActivityQuestion).filter((q) => q.question).slice(0, 8),
     followUpQuestions: asArray(o.followUpQuestions || o.followUps).map(toPlainText).filter(Boolean).slice(0, 6),

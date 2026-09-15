@@ -349,6 +349,7 @@ registerRoute("activities", () => {
 registerRoute("questions", () => {
   const body = el(`<div class="stack">
     <div class="notice small">여기에는 AI 전체분석 결과에서 사용자가 저장하거나 연습한 질문이 모입니다. 새 질문을 만들려면 생활기록부 전체 AI 분석을 이용하세요.</div>
+    <button class="btn-secondary" id="save-questions-file-btn">📄 질문지 파일로 저장 (.txt)</button>
     <div class="tab-bar">
       <button class="btn-primary small" data-filter="A">A · 반드시 준비</button>
       <button class="btn-ghost small" data-filter="B">B · 준비 권장</button>
@@ -357,6 +358,11 @@ registerRoute("questions", () => {
     <div id="q-list" class="stack"></div>
     <details class="optional-panel"><summary>기록별 6방향 질문을 더 만들기 <span class="muted small">(선택)</span></summary><div id="extra-q-sources" class="stack optional-panel-body"></div></details>
   </div>`);
+  body.querySelector("#save-questions-file-btn").onclick = () => {
+    if (!AppState.questions.length) { toast("저장할 질문이 없습니다. 먼저 질문을 만들어주세요."); return; }
+    exportQuestionsAsText(AppState);
+    toast("우선순위(A/B/C)별로 정리한 질문지 파일을 저장했습니다.");
+  };
   const list = body.querySelector("#q-list");
   let filter = "A";
   function renderList() {
@@ -1813,6 +1819,7 @@ registerRoute("print-sheet", () => {
     <button class="btn-primary" id="save-print-btn">저장</button>
     <button class="btn-secondary" id="open-print-btn">면접장에 가져갈 한 장 열기 (인쇄)</button>
     <p class="muted small">학생부 원문 전체는 인쇄물에 넣지 않습니다. 실전 면접실 반입 가능 여부는 대학 안내를 확인하세요. 브라우저·프린터 여백 설정에 따라 실제 출력 결과를 한 번 확인해 보세요.</p>
+    <p class="muted small">이 한 장은 A급 질문 5개만 요약합니다. 준비한 질문 전체를 파일로 갖고 있고 싶다면 <button class="inline-link-btn" onclick="navigate('questions')">질문 목록</button>에서 [질문지 파일로 저장]을 이용하세요.</p>
   </div>`);
   body.querySelector("#save-print-btn").onclick = () => {
     s.introKeywords = body.querySelector("#p-intro").value;

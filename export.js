@@ -178,6 +178,68 @@ function redactCommonPii(text) {
     .replace(/(19|20)\d{2}[.\-/]\s?(0?[1-9]|1[0-2])[.\-/]\s?(0?[1-9]|[12]\d|3[01])/g, "[생년월일 삭제]");
 }
 
+// ── 질문지 파일 저장 (사람이 읽는 .txt) ──────────────────────────────
+// JSON 백업(exportStateAsJson)과 달리, 학생이 만든 예상질문을 그대로 읽고
+// 인쇄하거나 다른 사람과 공유할 수 있는 평문 텍스트로 만듭니다.
+// 학생부 원문 전체는 넣지 않고, 질문의 근거문장(evidenceText)만 짧게 잘라
+// redactCommonPii로 한 번 더 개인정보 후보를 가린 뒤 포함합니다.
+function buildQuestionsTextContent(state) {
+  const uni = typeof getActiveUniversity === "function" ? getActiveUniversity() : null;
+  const qs = state.questions || [];
+  const groups = [
+    { key: "A", label: "A · 반드시 준비" },
+    { key: "B", label: "B · 준비 권장" },
+    { key: "C", label: "C · 여유가 있으면" },
+    { key: null, label: "우선순위 미지정" },
+  ];
+
+  const lines = [];
+  lines.push("나의 면접 예상질문 정리");
+  lines.push(`저장일: ${new Date().toLocaleString("ko-KR")}`);
+  const uniLine = uni ? [uni.name, uni.major, uni.track].filter(Boolean).join(" · ") : "";
+  if (uniLine) lines.push(`지원 정보: ${uniLine}`);
+  lines.push("");
+  lines.push("이 파일은 본인이 이 프로그램에서 직접 정리·연습한 예상질문 모음입니다.");
+  lines.push("실제 대학 기출문항이 아니며, 학생부 원문 전체나 성적·수상 등 식별정보는");
+  lines.push("자동으로 넣지 않도록 처리했지만 최종 확인은 본인이 직접 해 주세요.");
+  lines.push("=".repeat(44));
+
+  let any = false;
+  groups.forEach((g) => {
+    const pool = qs.filter((q) => (q.priority || null) === g.key);
+    if (!pool.length) return;
+    any = true;
+    lines.push("");
+    lines.push(`■ ${g.label} (${pool.length}개)`);
+    pool.forEach((q, idx) => {
+      lines.push("");
+      lines.push(`${idx + 1}. [${q.directionLabel || "질문"}] ${q.text || ""}`);
+      if (q.hint) lines.push(`   힌트: ${q.hint}`);
+      if (q.evidenceText) {
+        const ev = redactCommonPii(String(q.evidenceText)).slice(0, 150);
+        const cut = String(q.evidenceText).length > 150 ? "…" : "";
+        lines.push(`   학생부 근거(${q.evidenceSection || "학생부"}): ${ev}${cut}`);
+      }
+      const noted = Array.isArray(q.followUps) ? q.followUps.filter((f) => f && (f.note || f.done)) : [];
+      if (noted.length) {
+        lines.push(`   꼬리질문 메모:`);
+        noted.forEach((f) => lines.push(`     ${f.done ? "[완료]" : "[진행중]"} ${f.label}${f.note ? " - " + f.note : ""}`));
+      }
+    });
+  });
+  if (!any) lines.push("\n(아직 저장된 질문이 없습니다. 먼저 AI 전체분석이나 질문 추가를 진행해 주세요.)");
+
+  lines.push("");
+  lines.push("=".repeat(44));
+  lines.push("면접실 반입 가능 여부는 대학마다 다르니 실제 사용 전 대학 안내를 확인하세요.");
+  return lines.join("\n");
+}
+
+function exportQuestionsAsText(state) {
+  const content = buildQuestionsTextContent(state);
+  downloadFile(`interview-questions-${Date.now()}.txt`, "\uFEFF" + content, "text/plain;charset=utf-8");
+}
+
 function exportInterviewLogsAnonymized(logs) {
   const rawText = (logs || []).map((l) => [l.questions, l.hardestFollowUp, l.unexpected].flat().join(" ")).join("\n");
   const hits = typeof findPiiCandidates === "function" ? findPiiCandidates(rawText) : [];

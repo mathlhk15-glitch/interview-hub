@@ -13,8 +13,8 @@ const parser = fs.readFileSync('ai-result-parser.js','utf8');
 const exp = fs.readFileSync('export.js','utf8');
 const trainer = fs.readFileSync('trainer.js','utf8');
 
-ok('version is v6.2', /6\.2-deep-verification-trainer/.test(config));
-ok('cache bust is v6.2', /style\.css\?v=6\.2/.test(index) && /screens2\.js\?v=6\.2/.test(index));
+ok('version is v6.3', /6\.3-question-file-export/.test(config));
+ok('cache bust is v6.3', /style\.css\?v=6\.3/.test(index) && /screens2\.js\?v=6\.3/.test(index));
 ok('new product name', /대입 면접 셀프 트레이너/.test(index));
 ok('readiness route exists', /registerRoute\("readiness"/.test(screens2));
 ok('university DB picker exists', /openUniDbPicker/.test(screens));
@@ -44,6 +44,9 @@ ok('import resets existing session', /resetPreparationStateForImport/.test(exp) 
 ok('save-loss banner exists', /자동 저장되지 않습니다/.test(screens));
 ok('beforeunload warns without clearing raw data', /beforeunload[\s\S]*hasVolatilePreparationData/.test(app) && !/beforeunload[\s\S]{0,300}recordRawText\s*=\s*""/.test(app));
 ok('practice stats exist', /practiceStats/.test(app));
+ok('question file save button exists', /save-questions-file-btn/.test(screens2) && /exportQuestionsAsText/.test(screens2));
+ok('question file export builds grouped text', /buildQuestionsTextContent/.test(exp) && /redactCommonPii\(String\(q\.evidenceText\)\)/.test(exp));
+ok('print sheet links to full question file save', /질문지 파일로 저장\]을 이용하세요/.test(screens2));
 
 const ctx = { window: {} }; vm.createContext(ctx); vm.runInContext(fs.readFileSync('data.js','utf8'), ctx);
 const d = ctx.window.APP_DATA;
@@ -81,5 +84,19 @@ const sampleState = {
 const payloadNoNotes = exportCtx.buildExportPayload(sampleState, { includePreparationNotes:false });
 ok('unchecked preparation notes are excluded from JSON', payloadNoNotes.commonAnswers === undefined && payloadNoNotes.practiceStats === undefined && payloadNoNotes.motivation === undefined);
 
-console.log(`v6.2 self trainer test finished. fail=${fail}`);
+// 질문지 파일 저장: 우선순위별로 묶이고, 근거문장 속 개인정보 후보는 가려져야 함.
+exportCtx.getActiveUniversity = () => ({ name: '테스트대학교', major: '테스트학과', track: '테스트전형' });
+const questionState = {
+  questions: [
+    { priority: 'A', directionLabel: '개념', text: 'A급 질문', hint: '힌트A', evidenceText: '010-1234-5678로 연락한 경험', evidenceSection: '동아리', followUps: [{ label: '1층', prompt: '', done: true, note: '메모1' }] },
+    { priority: 'B', directionLabel: '과정', text: 'B급 질문' },
+  ],
+};
+const qFileText = exportCtx.buildQuestionsTextContent(questionState);
+ok('question file groups by priority', /A · 반드시 준비/.test(qFileText) && /B · 준비 권장/.test(qFileText));
+ok('question file includes university info', /테스트대학교/.test(qFileText));
+ok('question file redacts phone numbers in evidence', !/010-1234-5678/.test(qFileText) && /\[전화번호 삭제\]/.test(qFileText));
+ok('question file keeps followup notes', /메모1/.test(qFileText));
+
+console.log(`v6.3 self trainer test finished. fail=${fail}`);
 process.exitCode = fail ? 1 : 0;

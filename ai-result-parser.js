@@ -313,7 +313,7 @@ function buildFallbackSection(rawText) {
   };
 }
 
-// ── v7.3 RAG-lite: AI evidence quote ↔ original record verification ──────
+// ── v7.4 RAG-lite: AI evidence quote ↔ original record verification ──────
 function normalizeEvidenceText(value) {
   return String(value || '').toLowerCase().replace(/[\s\u00a0]+/g, '').replace(/[“”‘’'"`.,·•:;()\[\]{}<>!?？…\-–—_/\\]/g, '');
 }

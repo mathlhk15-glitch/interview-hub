@@ -470,3 +470,8 @@ body.printing-active #print-mount { display: block; }
 
 /* v7.3 RAG feedback */
 .rag-vote-row{margin-top:8px;align-items:center}.rag-vote-row button[aria-pressed="true"]{font-weight:800;outline:2px solid currentColor;outline-offset:1px}.rag-result-card{transition:opacity .2s ease}.rag-vote-state{min-height:1em}
+
+
+/* v7.4 질문지 전체 인쇄 접근성 */
+.topbar-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}.topbar-print-btn{white-space:nowrap}.screen-quick-actions{display:flex;justify-content:flex-end;margin-top:-4px}.question-print-shortcut{width:auto}.question-print-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid color-mix(in srgb,var(--primary) 45%,var(--line));border-radius:12px;background:color-mix(in srgb,var(--primary) 6%,var(--surface))}.question-print-banner div{display:flex;flex-direction:column;gap:2px}.question-print-banner span{font-size:.86rem;color:var(--muted)}.question-print-banner button{width:auto;min-width:180px}.flow-nav .flow-print-btn{color:var(--primary);border-color:var(--primary)}
+@media(max-width:560px){#topbar{align-items:flex-start}.topbar-actions{gap:5px}.topbar-print-btn span{display:none}.topbar-print-btn{min-width:38px;padding:8px 10px}.screen-quick-actions{justify-content:stretch}.screen-quick-actions .question-print-shortcut{width:100%}.question-print-banner{align-items:stretch;flex-direction:column}.question-print-banner button{width:100%;min-width:0}.flow-nav{flex-wrap:wrap}.flow-nav button{flex:1 1 40%}}

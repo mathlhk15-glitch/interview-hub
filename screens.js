@@ -3,6 +3,14 @@
  * 각 화면을 만들어 반환하는 함수들을 라우터에 등록합니다.
  */
 
+
+function buildQuestionPrintShortcut(label) {
+  if (!AppState.questions || !AppState.questions.length) return null;
+  const btn = el(`<button class="btn-secondary small question-print-shortcut">🖨️ ${escapeHtml(label || "질문지 전체 인쇄")}</button>`);
+  btn.onclick = () => openQuestionsPrintView(AppState);
+  return btn;
+}
+
 function screenShell(title, subtitle, bodyEl, opts) {
   opts = opts || {};
   const wrap = el(`<div class="screen"></div>`);
@@ -12,6 +20,10 @@ function screenShell(title, subtitle, bodyEl, opts) {
   if (title) wrap.appendChild(el(`<h1 class="screen-title">${escapeHtml(title)}</h1>`));
   if (subtitle) wrap.appendChild(el(`<p class="screen-subtitle">${escapeHtml(subtitle)}</p>`));
   const routeName = currentRoute().name;
+  if (routeName !== "questions") {
+    const printShortcut = buildQuestionPrintShortcut();
+    if (printShortcut) wrap.appendChild(el(`<div class="screen-quick-actions"></div>`)).appendChild(printShortcut);
+  }
   if (typeof FLOW_STEPS !== "undefined" && FLOW_STEPS.some((s) => s.route === routeName) && AppState.universities.length) {
     const active = getActiveUniversity();
     if (active) wrap.appendChild(el(`<div class="active-uni-banner"><span>현재 준비 대학</span><strong>${escapeHtml(active.name || "(대학명 미입력)")} · ${escapeHtml(active.major || "")}</strong></div>`));
@@ -41,6 +53,7 @@ registerRoute("home", () => {
   </div>
   <div class="home-footer">
     <button class="btn-ghost small" onclick="navigate('data-io')">내 준비 데이터 저장/불러오기</button>
+    <button class="btn-secondary small" onclick="openQuestionsPrintView(AppState)">🖨️ 질문지 전체 인쇄</button>
     <button class="btn-ghost small" onclick="navigate('crisis-card')">위기 대응 카드</button>
     <button class="btn-ghost small" id="theme-toggle-btn" onclick="toggleTheme()">🌙 어둡게</button>
   </div>`);
@@ -54,7 +67,7 @@ registerRoute("student-dashboard", () => {
   const body = el(`<div class="stack"></div>`);
   body.appendChild(el(`<div class="session-save-banner"><strong>자동 저장되지 않습니다.</strong><span>새로고침·탭 종료 시 현재 준비 내용이 사라질 수 있습니다. 중요한 작업은 아래의 <b>내 준비 데이터 저장(JSON)</b>으로 백업하세요.</span><button class="btn-ghost small" onclick="navigate('data-io')">지금 백업</button></div>`));
   body.appendChild(el(`<div class="hero-card ai-first-hero">
-    <div class="hero-kicker">v6.2 SELF-INTERVIEW · 무료 · API 없음</div>
+    <div class="hero-kicker">v7.4 SELF-INTERVIEW · 무료 · API 없음</div>
     <h2>학생부를 분석하고, 같은 활동을 단계적으로 끝까지 말해보세요</h2>
     <p>프로그램이 짧은 규칙으로 질문을 억지로 만들지 않습니다. 생활기록부 텍스트를 안전하게 추출한 뒤, 사용자가 선택한 AI가 <strong>전체 활동 → 7단계 질문 깊이 → 답변 프레임 → 연속 꼬리질문</strong> 순으로 분석하도록 프롬프트를 만듭니다.</p>
     <button class="btn-primary big" id="quick-pdf-btn">1. 생활기록부 PDF 넣기</button>
@@ -68,6 +81,9 @@ registerRoute("student-dashboard", () => {
   const hasActivityAi = hasDirectActivityRecords();
   if (AppState.aiResultSections) {
     body.appendChild(el(`<button class="btn-primary big" onclick="navigate('ai-results')">최근 AI 전체 분석 결과 다시 보기</button>`));
+  }
+  if (AppState.questions.length) {
+    body.appendChild(el(`<div class="question-print-banner"><div><strong>질문을 모두 종이로 보고 싶나요?</strong><span> A/B/C 우선순위별 예상질문 전체를 바로 인쇄할 수 있습니다.</span></div><button class="btn-secondary" onclick="openQuestionsPrintView(AppState)">🖨️ 질문지 전체 인쇄</button></div>`));
   }
   if (AppState.aiResultSections || AppState.questions.length || AppState.weaknessEntries.length) {
     const rs = getReadinessSummary();

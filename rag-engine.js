@@ -1,5 +1,5 @@
 /**
- * rag-engine.js - Interview Hub v7.4 RAG-lite
+ * rag-engine.js - Interview Hub v7.5 RAG-lite
  * No API / no backend / no vector DB. Browser-only lexical + metadata retrieval.
  * rag-data.js is lazy-loaded only when retrieval is actually requested.
  */
@@ -14,7 +14,7 @@
     if (ragLoadPromise) return ragLoadPromise;
     ragLoadPromise = new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = 'rag-data.js?v=7.4';
+      script.src = 'rag-data.js?v=7.5';
       script.async = true;
       script.onload = () => window.INTERVIEW_RAG_DATA?.questions?.length
         ? resolve(window.INTERVIEW_RAG_DATA)

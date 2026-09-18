@@ -291,20 +291,24 @@ function buildFlowNav(currentKey) {
   }
   const prev = idx > 0 ? FLOW_STEPS[idx - 1] : null;
   const next = idx < FLOW_STEPS.length - 1 ? FLOW_STEPS[idx + 1] : null;
-  const hasQuestions = Array.isArray(AppState.questions) && AppState.questions.length > 0;
+  const canAllPrint = typeof hasAllPrintableQuestions === "function" && hasAllPrintableQuestions(AppState);
+  const canSavedPrint = typeof hasSavedPrintableQuestions === "function" && hasSavedPrintableQuestions(AppState);
   const nav = el(`<div class="flow-nav">
     <button class="btn-ghost small" ${prev ? "" : "disabled"}>◀ 이전</button>
     <button class="btn-ghost small">학생 홈</button>
-    ${hasQuestions ? '<button class="btn-secondary small flow-print-btn">🖨️ 질문지</button>' : ''}
+    ${canAllPrint ? '<button class="btn-secondary small flow-print-all-btn">🖨️ 모든 질문</button>' : ''}
+    ${canSavedPrint ? '<button class="btn-ghost small flow-print-saved-btn">📌 저장 질문</button>' : ''}
     <button class="btn-ghost small" ${next ? "" : "disabled"}>다음 ▶</button>
   </div>`);
-  const buttons = [...nav.querySelectorAll("button")];
-  const prevBtn = buttons[0], homeBtn = buttons[1];
-  const printBtn = hasQuestions ? buttons[2] : null;
-  const nextBtn = buttons[hasQuestions ? 3 : 2];
+  const prevBtn = nav.querySelector("button:first-child");
+  const homeBtn = nav.querySelectorAll("button")[1];
+  const allBtn = nav.querySelector(".flow-print-all-btn");
+  const savedBtn = nav.querySelector(".flow-print-saved-btn");
+  const nextBtn = nav.querySelector("button:last-child");
   if (prev) prevBtn.onclick = () => navigate(prev.route);
   homeBtn.onclick = () => navigate("student-dashboard");
-  if (printBtn) printBtn.onclick = () => openQuestionsPrintView(AppState);
+  if (allBtn) allBtn.onclick = () => openAllQuestionsPrintView(AppState);
+  if (savedBtn) savedBtn.onclick = () => openSavedQuestionsPrintView(AppState);
   if (next) nextBtn.onclick = () => navigate(next.route);
   return nav;
 }

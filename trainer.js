@@ -13,7 +13,7 @@ function pickSupportedMimeType() {
 
 
 
-// ── v7.4 질문 TTS · STT · 브라우저 지원 감지 ──────────────────────────
+// ── v7.5 질문 TTS · STT · 브라우저 지원 감지 ──────────────────────────
 function getInterviewBrowserSupport() {
   const ua = navigator.userAgent || "";
   const isIPadDesktopUA = navigator.platform === "MacIntel" && Number(navigator.maxTouchPoints || 0) > 1;

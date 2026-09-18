@@ -348,9 +348,10 @@ registerRoute("activities", () => {
 // ── 핵심 예상질문 — 자동생성 결과를 우선순위별로 바로 보여줍니다 ─────────
 registerRoute("questions", () => {
   const body = el(`<div class="stack">
-    <div class="notice small">여기에는 AI 전체분석 결과에서 사용자가 저장하거나 연습한 질문이 모입니다. 새 질문을 만들려면 생활기록부 전체 AI 분석을 이용하세요.</div>
+    <div class="notice small">여기에는 AI 전체분석 결과에서 사용자가 질문은행에 저장하거나 연습한 질문이 모입니다. <strong>[모든 질문 인쇄]</strong>는 저장하지 않은 AI 분석 질문까지 포함하고, <strong>[저장된 질문만 인쇄]</strong>는 이 질문은행의 질문만 출력합니다.</div>
     <button class="btn-secondary" id="save-questions-file-btn">📄 질문지 파일로 저장 (.txt)</button>
-    <button class="btn-secondary" id="print-questions-btn">🖨️ 질문지 전체 인쇄</button>
+    <button class="btn-secondary" id="print-all-questions-btn">🖨️ 모든 질문 인쇄</button>
+    <button class="btn-ghost" id="print-saved-questions-btn">📌 저장된 질문만 인쇄</button>
     <div class="tab-bar">
       <button class="btn-primary small" data-filter="A">A · 반드시 준비</button>
       <button class="btn-ghost small" data-filter="B">B · 준비 권장</button>
@@ -364,7 +365,8 @@ registerRoute("questions", () => {
     exportQuestionsAsText(AppState);
     toast("우선순위(A/B/C)별로 정리한 질문지 파일을 저장했습니다.");
   };
-  body.querySelector("#print-questions-btn").onclick = () => openQuestionsPrintView(AppState);
+  body.querySelector("#print-all-questions-btn").onclick = () => openAllQuestionsPrintView(AppState);
+  body.querySelector("#print-saved-questions-btn").onclick = () => openSavedQuestionsPrintView(AppState);
   const list = body.querySelector("#q-list");
   let filter = "A";
   function renderList() {
@@ -841,7 +843,7 @@ function renderAiWizard(mount, mode) {
 
 registerRoute("ai-results", () => {
   const body = el(`<div class="stack"></div>`);
-  if (AppState.questions.length) body.appendChild(el(`<div class="row-gap"><button class="btn-secondary" onclick="openQuestionsPrintView(AppState)">🖨️ 질문지 전체 인쇄</button><button class="btn-ghost" onclick="navigate('questions')">질문 목록 보기</button></div>`));
+  if (AppState.questions.length) body.appendChild(el(`<div class="row-gap"><button class="btn-secondary" onclick="openAllQuestionsPrintView(AppState)">🖨️ 모든 질문 인쇄</button><button class="btn-ghost" onclick="openSavedQuestionsPrintView(AppState)">📌 저장된 질문만 인쇄</button><button class="btn-ghost" onclick="navigate('questions')">질문 목록 보기</button></div>`));
   if (!AppState.aiResultSections) {
     body.appendChild(el(`<div class="notice">저장된 AI 전체 분석 결과가 없습니다. 생활기록부를 불러온 뒤 전체 AI 분석을 먼저 진행하세요.</div>`));
     body.appendChild(el(`<button class="btn-primary" onclick="navigateAiMode('record-full')">전체 AI 분석 시작</button>`));
@@ -1428,7 +1430,7 @@ registerRoute("trainer", (params) => {
     </div>
     <p class="muted small" id="attempt-count"></p>
     <div class="notice small">문장을 외우기보다 <strong>핵심어와 사고 순서</strong>를 반복하세요. <strong>45초 핵심답변은 훈련용 기준</strong>이며 실제 면접에서는 질문에 필요한 만큼 답하세요. 녹음은 메모리에만 두고 새로고침하면 사라집니다.</div>
-    <div class="row-gap"><button class="btn-secondary" onclick="openQuestionsPrintView(AppState)">🖨️ 질문지 전체 인쇄</button><button class="btn-secondary" onclick="navigate('mock-eval')">자가진단 체크하기</button></div>
+    <div class="row-gap"><button class="btn-secondary" onclick="openAllQuestionsPrintView(AppState)">🖨️ 모든 질문 인쇄</button><button class="btn-ghost" onclick="openSavedQuestionsPrintView(AppState)">📌 저장된 질문만 인쇄</button><button class="btn-secondary" onclick="navigate('mock-eval')">자가진단 체크하기</button></div>
     <section class="ai-highlight-card compact-ai-card" aria-label="내 답변 AI 피드백">
       <div class="ai-highlight-icon" aria-hidden="true">✨</div>
       <div class="ai-highlight-copy"><span class="ai-highlight-kicker">선택 기능 · API 없음</span><h3>내 답변 AI 피드백</h3><p>답변을 직접 입력하면 복사용 프롬프트를 만들어줍니다. AI는 모범답안을 대신 쓰지 않고 보완점과 꼬리질문을 제안합니다.</p></div>
@@ -1684,7 +1686,7 @@ registerRoute("readiness", () => {
       <div class="card readiness-item"><strong>${rs.totalAttempts}</strong><span>총 말하기 시도</span></div>
       <div class="card readiness-item"><strong>${rs.mmiCount}</strong><span>MMI 연습</span></div>
     </div>
-    <div class="row-gap"><button class="btn-secondary" onclick="openQuestionsPrintView(AppState)">🖨️ 질문지 전체 인쇄</button><button class="btn-ghost" onclick="navigate('questions')">질문 목록 보기</button></div>
+    <div class="row-gap"><button class="btn-secondary" onclick="openAllQuestionsPrintView(AppState)">🖨️ 모든 질문 인쇄</button><button class="btn-ghost" onclick="openSavedQuestionsPrintView(AppState)">📌 저장된 질문만 인쇄</button><button class="btn-ghost" onclick="navigate('questions')">질문 목록 보기</button></div>
     <div id="next-action" class="card next-action-card"></div>
     <div class="card"><h3>안전 확인</h3><p>${rs.blindChecked ? "✅ 등록한 대학의 공식자료 확인 및 블라인드 정보 입력이 되어 있습니다." : "⚠️ 대학별 공식 모집요강과 블라인드 규정을 아직 확인 표시하지 않았습니다."}</p><button class="btn-ghost small" onclick="navigate('universities')">대학 정보 확인</button> <button class="btn-ghost small" onclick="navigate('blind-check')">답변 블라인드 점검</button></div>
   </div>`);
@@ -1922,9 +1924,10 @@ registerRoute("print-sheet", () => {
     <label class="field"><span>마지막 할 말 (60자 이내)</span><input id="p-last" maxlength="60" value="${escapeHtml(s.lastWord||"")}"></label>
     <button class="btn-primary" id="save-print-btn">저장</button>
     <button class="btn-secondary" id="open-print-btn">면접장에 가져갈 한 장 열기 (인쇄)</button>
-    <button class="btn-primary" id="open-all-questions-print-btn">🖨️ 예상질문 전체 인쇄</button>
+    <button class="btn-primary" id="open-all-questions-print-btn">🖨️ 모든 질문 인쇄</button>
+    <button class="btn-secondary" id="open-saved-questions-print-btn">📌 저장된 질문만 인쇄</button>
     <p class="muted small">학생부 원문 전체는 인쇄물에 넣지 않습니다. 실전 면접실 반입 가능 여부는 대학 안내를 확인하세요. 브라우저·프린터 여백 설정에 따라 실제 출력 결과를 한 번 확인해 보세요.</p>
-    <p class="muted small">이 한 장은 A급 질문 5개만 요약합니다. <strong>전체 질문은 바로 위의 [예상질문 전체 인쇄]</strong>를 누르세요. 또는 <button class="inline-link-btn" onclick="navigate('questions')">질문 목록</button>에서 파일 저장도 할 수 있습니다.</p>
+    <p class="muted small">이 한 장은 A급 질문 5개만 요약합니다. <strong>저장 여부와 관계없이 모두 보려면 [모든 질문 인쇄]</strong>, 질문은행에 고른 것만 보려면 <strong>[저장된 질문만 인쇄]</strong>를 누르세요. 또는 <button class="inline-link-btn" onclick="navigate('questions')">질문 목록</button>에서 파일 저장도 할 수 있습니다.</p>
   </div>`);
   body.querySelector("#save-print-btn").onclick = () => {
     s.introKeywords = body.querySelector("#p-intro").value;
@@ -1932,7 +1935,8 @@ registerRoute("print-sheet", () => {
     toast("저장했습니다.");
   };
   body.querySelector("#open-print-btn").onclick = () => openPrintView(s);
-  body.querySelector("#open-all-questions-print-btn").onclick = () => openQuestionsPrintView(AppState);
+  body.querySelector("#open-all-questions-print-btn").onclick = () => openAllQuestionsPrintView(AppState);
+  body.querySelector("#open-saved-questions-print-btn").onclick = () => openSavedQuestionsPrintView(AppState);
   body.appendChild(buildFlowNav("print-sheet"));
   return screenShell("면접 직전 모드", "", body);
 });

@@ -4,13 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="description" content="2027 대입 면접 셀프 트레이너 — 학생부 분석부터 단계형 꼬리질문·말하기·MMI까지 연습하는 무료 정적 웹앱">
-<title>2027 대입 면접 셀프 트레이너 v7.4 RAG-lite · 인쇄 접근성 강화</title>
-<link rel="stylesheet" href="style.css?v=7.4">
+<title>2027 대입 면접 셀프 트레이너 v7.5 RAG-lite · 이중 질문지 인쇄</title>
+<link rel="stylesheet" href="style.css?v=7.5">
 </head>
 <body>
   <header id="topbar">
-    <div class="brand"><button onclick="navigate('home')">2027 대입 면접 셀프 트레이너 <small>v7.4 RAG-lite · 인쇄 접근성 강화</small></button></div>
-    <div class="topbar-actions"><button class="btn-secondary small topbar-print-btn" onclick="openQuestionsPrintView(AppState)" aria-label="질문지 전체 인쇄">🖨️ <span>질문지 전체 인쇄</span></button><button class="btn-ghost small" onclick="navigate('crisis-card')" aria-label="위기 대응 카드 열기">위기 카드</button></div>
+    <div class="brand"><button onclick="navigate('home')">2027 대입 면접 셀프 트레이너 <small>v7.5 RAG-lite · 이중 질문지 인쇄</small></button></div>
+    <div class="topbar-actions"><button class="btn-secondary small topbar-print-btn" onclick="openAllQuestionsPrintView(AppState)" aria-label="모든 질문 인쇄">🖨️ <span>모든 질문</span></button><button class="btn-ghost small topbar-print-btn" onclick="openSavedQuestionsPrintView(AppState)" aria-label="저장된 질문만 인쇄">📌 <span>저장 질문</span></button><button class="btn-ghost small" onclick="navigate('crisis-card')" aria-label="위기 대응 카드 열기">위기 카드</button></div>
   </header>
   <div id="browser-support-banner" class="browser-support-banner" style="display:none"></div>
   <div class="progress-track"><div id="progress-bar" class="progress-fill"></div></div>
@@ -25,18 +25,18 @@
   <!-- 정적 vendor: 로컬 파일만 사용, 외부 CDN 요청 없음 -->
   <script src="assets/vendor/pdfjs/pdf.min.js"></script>
 
-  <script src="config.js?v=7.4"></script>
-  <script src="data.js?v=7.4"></script>
-  <script src="app.js?v=7.4"></script>
-  <script src="record-parser.js?v=7.4"></script>
-  <script src="question-engine.js?v=7.4"></script>
-  <script src="rag-engine.js?v=7.4"></script>
-  <script src="prompt-generator.js?v=7.4"></script>
-  <script src="ai-result-parser.js?v=7.4"></script>
-  <script src="trainer.js?v=7.4"></script>
-  <script src="print.js?v=7.4"></script>
-  <script src="export.js?v=7.4"></script>
-  <script src="screens.js?v=7.4"></script>
-  <script src="screens2.js?v=7.4"></script>
+  <script src="config.js?v=7.5"></script>
+  <script src="data.js?v=7.5"></script>
+  <script src="app.js?v=7.5"></script>
+  <script src="record-parser.js?v=7.5"></script>
+  <script src="question-engine.js?v=7.5"></script>
+  <script src="rag-engine.js?v=7.5"></script>
+  <script src="prompt-generator.js?v=7.5"></script>
+  <script src="ai-result-parser.js?v=7.5"></script>
+  <script src="trainer.js?v=7.5"></script>
+  <script src="print.js?v=7.5"></script>
+  <script src="export.js?v=7.5"></script>
+  <script src="screens.js?v=7.5"></script>
+  <script src="screens2.js?v=7.5"></script>
 </body>
 </html>

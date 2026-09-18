@@ -757,10 +757,37 @@ function renderAiWizard(mount, mode) {
 
   function renderGenerateStep() {
     wizard.appendChild(el(`<h3>단계 4-5 · 프롬프트 생성 및 복사</h3>`));
-    const uni = getActiveUniversity();
-    const prompt = buildAiPrompt({ university: uni, mode, redactedPreviewText: state.redactedText });
-    const ta = el(`<textarea rows="12" readonly>${escapeHtml(prompt)}</textarea>`);
-    wizard.appendChild(ta);
+    const loading = el(`<div class="notice" id="rag-loading">면접 참고자료를 필요한 시점에만 불러와 검색하고 있습니다…</div>`);
+    wizard.appendChild(loading);
+    void (async () => {
+      const uni = getActiveUniversity();
+      let ragLoadFailed = false;
+      try { if (typeof ensureRagDataLoaded === "function" && mode !== "feedback") await ensureRagDataLoaded(); }
+      catch (err) { ragLoadFailed = true; loading.textContent = `면접 참고자료를 불러오지 못해 학생부 중심 분석으로 자동 전환했습니다. 질문 생성은 정상적으로 계속할 수 있습니다. (${err.message || err})`; }
+      const prompt = buildAiPrompt({ university: uni, mode, redactedPreviewText: state.redactedText });
+      if (!ragLoadFailed && loading.parentNode) loading.remove();
+      const ragRows = (mode !== "feedback" && typeof retrieveInterviewKnowledge === "function") ? retrieveInterviewKnowledge({ university:uni, studentText:state.redactedText, limit:5 }) : [];
+      if (ragRows.length) {
+        const dbg = el(`<details class="card soft-card"><summary><strong>RAG 검색 결과 미리보기</strong> · 이번 프롬프트에 참고된 상위 ${ragRows.length}개</summary><div class="notice small">관련도 점수는 합격 가능성이나 문항의 우수성 점수가 아니라 <strong>현재 학생 자료와의 검색 적합도</strong>입니다. 👍/👎 표시는 서버로 전송되지 않으며, 다음 검색부터 반영됩니다.</div><div class="stack rag-debug-list"></div><div class="row-gap"><button class="btn-ghost small" data-rag-reset>RAG 평가 초기화</button></div></details>`);
+        const list = dbg.querySelector(".rag-debug-list");
+        ragRows.forEach((r,i)=>{
+          const vote = AppState.ragFeedback?.[r.id] || "";
+          const card = el(`<div class="notice small rag-result-card" data-rag-id="${escapeHtml(r.id)}"><strong>${i+1}. ${escapeHtml(r.question)}</strong><br><span class="muted">${escapeHtml(r.sourceTitle)} · p.${escapeHtml(String(r.page))} · 관련도 ${escapeHtml(String(r.adjustedScore ?? r.score))} · 품질 ${escapeHtml(r.quality || "usable")}</span>${r.matchedTerms?.length ? `<br><span class="muted">매칭: ${r.matchedTerms.map(escapeHtml).join(" · ")}</span>` : ""}${r.matchReasons?.length ? `<br><span class="muted">선정 이유: ${r.matchReasons.map(escapeHtml).join(" · ")}</span>` : ""}<div class="row-gap rag-vote-row"><button class="btn-ghost small" data-vote="up" aria-pressed="${vote==='up'}">👍 유용</button><button class="btn-ghost small" data-vote="down" aria-pressed="${vote==='down'}">👎 제외</button><span class="muted rag-vote-state">${vote==='up'?'유용 표시됨':vote==='down'?'다음 검색부터 제외':''}</span></div></div>`);
+          card.querySelectorAll('[data-vote]').forEach((btn)=>btn.onclick=()=>{
+            const nextVote = btn.dataset.vote; const currentVote = AppState.ragFeedback?.[r.id] || null;
+            if (typeof setRagFeedback === 'function') setRagFeedback(r.id, currentVote === nextVote ? null : nextVote);
+            const now = AppState.ragFeedback?.[r.id] || '';
+            card.querySelectorAll('[data-vote]').forEach((b)=>b.setAttribute('aria-pressed', String(b.dataset.vote===now)));
+            card.querySelector('.rag-vote-state').textContent = now==='up'?'유용 표시됨':now==='down'?'다음 검색부터 제외':'';
+            toast(now==='down'?'다음 RAG 검색부터 이 문항을 제외합니다.':now==='up'?'다음 RAG 검색에서 이 문항을 우선 참고합니다.':'RAG 평가를 취소했습니다.');
+          });
+          list.appendChild(card);
+        });
+        dbg.querySelector('[data-rag-reset]').onclick=()=>{ AppState.ragFeedback = {}; dbg.querySelectorAll('[data-vote]').forEach((b)=>b.setAttribute('aria-pressed','false')); dbg.querySelectorAll('.rag-vote-state').forEach((x)=>x.textContent=''); toast('세션의 RAG 평가를 초기화했습니다.'); };
+        wizard.appendChild(dbg);
+      }
+      const ta = el(`<textarea rows="12" readonly>${escapeHtml(prompt)}</textarea>`);
+      wizard.appendChild(ta);
     const copyBtn = el(`<button class="btn-primary">프롬프트 복사하기</button>`);
     copyBtn.onclick = async () => {
       try { await navigator.clipboard.writeText(prompt); toast("복사했습니다. 사용하는 AI에 붙여넣으세요."); }
@@ -805,6 +832,7 @@ function renderAiWizard(mount, mode) {
     wizard.appendChild(importBtn);
     wizard.appendChild(resultBox);
     wizard.appendChild(el(`<div class="notice small">AI 분석 결과는 참고자료입니다. 학생부 원문과 대학 모집요강을 기준으로 직접 확인하세요.</div>`));
+    })();
   }
 
   renderStep();
@@ -838,8 +866,10 @@ function aiEvidenceHtml(area, quote, missingMessage) {
   const a = String(area || "").trim();
   const q = String(quote || "").trim();
   if (a || q) {
+    const check = q && typeof verifyEvidenceQuote === "function" ? verifyEvidenceQuote(q) : null;
+    const badge = check ? `<span class="evidence-verify-badge evidence-${escapeHtml(check.status)}">${escapeHtml(check.status === "verified" ? "✓ " + check.label : check.status === "similar" ? "△ " + check.label : "⚠ " + check.label)}</span>` : "";
     return `<div class="ai-evidence-box">
-      <span class="ai-evidence-label">근거 학생부${a ? ` · ${escapeHtml(a)}` : ""}</span>
+      <div class="row-between"><span class="ai-evidence-label">근거 자료${a ? ` · ${escapeHtml(a)}` : ""}</span>${badge}</div>
       ${q ? `<p>“${escapeHtml(q)}”</p>` : `<p class="muted">근거 영역은 있으나 원문 인용이 포함되지 않았습니다.</p>`}
     </div>`;
   }
@@ -1361,8 +1391,17 @@ registerRoute("trainer", (params) => {
     <div id="frame-desc" class="notice small"></div>
     <div id="frame-steps" class="stack frame-step-grid"></div>
     <div id="frame-optional-tip" class="optional-expand-tip" style="display:none"></div>
-    <div class="row-gap">
-      <label class="field"><span>준비시간(초)</span><input id="prep-sec" type="number" value="10" min="0" max="600"></label>
+    <div class="trainer-voice-panel card soft-card">
+      <div class="row-between"><div><strong>질문 듣기 · 답변 받아쓰기</strong><p class="muted small">질문을 음성으로 듣고 생각한 뒤 답하세요. 받아쓰기는 선택 기능이며 기본 OFF입니다. 브라우저·운영체제에 따라 음성 처리가 외부 서비스에서 이루어질 수 있습니다.</p></div><button class="btn-ghost small" id="speak-q-btn">🔊 질문 듣기</button></div>
+      <div class="row-gap trainer-voice-options">
+        <label class="field compact-field"><span>읽기 속도</span><select id="tts-rate"><option value="0.85">0.85배</option><option value="1" selected>1.0배</option><option value="1.15">1.15배</option><option value="1.3">1.3배</option></select></label>
+        <label class="field checkbox compact-field"><input id="auto-tts" type="checkbox" checked> <span>연습 시작 시 질문 먼저 읽기</span></label>
+        <label class="field checkbox compact-field"><input id="stt-enabled" type="checkbox"> <span>답변 자동 받아쓰기(선택)</span></label>
+        <label class="field compact-field" id="mobile-audio-mode-wrap" style="display:none"><span>휴대폰 음성 기능</span><select id="mobile-audio-mode"><option value="record" selected>녹음 우선</option><option value="stt">받아쓰기 우선</option></select></label>
+        <label class="field compact-field"><span>생각시간(초)</span><input id="prep-sec" type="number" value="10" min="0" max="600"></label>
+      </div>
+      <div id="browser-capability" class="browser-capability small muted"></div>
+      <div class="notice small">자동 받아쓰기는 브라우저의 음성인식 기능을 사용합니다. 브라우저·운영체제에 따라 음성 데이터가 외부 음성인식 서비스에서 처리될 수 있습니다. 개인정보가 포함된 답변은 사용 여부를 직접 판단하세요.</div>
     </div>
     <div class="timer-box">
       <div id="phase-label" class="phase-label">대기 중</div>
@@ -1381,6 +1420,11 @@ registerRoute("trainer", (params) => {
     </div>
     <div id="rec-status" class="muted small"></div>
     <audio id="playback" controls style="display:none;width:100%"></audio>
+    <div class="transcript-card card soft-card">
+      <div class="row-between"><strong>지금 말한 내용</strong><span id="stt-status" class="muted small">대기 중</span></div>
+      <textarea id="answer-transcript" rows="6" placeholder="지원 브라우저에서는 답변이 자동으로 받아쓰기 됩니다. 직접 입력하거나 수정해도 됩니다."></textarea>
+      <div class="row-between transcript-tools"><span id="speech-metrics" class="muted small">말속도: 아직 기록 없음</span><div class="row-gap"><button class="btn-ghost small" id="stt-restart">받아쓰기 다시 시작</button><button class="btn-ghost small" id="clear-transcript">내용 지우기</button></div></div>
+    </div>
     <p class="muted small" id="attempt-count"></p>
     <div class="notice small">문장을 외우기보다 <strong>핵심어와 사고 순서</strong>를 반복하세요. <strong>45초 핵심답변은 훈련용 기준</strong>이며 실제 면접에서는 질문에 필요한 만큼 답하세요. 녹음은 메모리에만 두고 새로고침하면 사라집니다.</div>
     <div class="row-gap"><button class="btn-secondary" onclick="navigate('mock-eval')">자가진단 체크하기</button></div>
@@ -1390,6 +1434,23 @@ registerRoute("trainer", (params) => {
       <button class="btn-ai-strong" onclick="navigateAiMode('feedback')">내 답변 점검</button>
     </section>
   </div>`);
+
+  const support = typeof getInterviewBrowserSupport === "function" ? getInterviewBrowserSupport() : { tts:false, stt:false, recording:false, isMobile:false, isInApp:false };
+  const capability = body.querySelector("#browser-capability");
+  if (support.isIOS) {
+    const voicePanel = body.querySelector('.trainer-voice-panel');
+    if (voicePanel) voicePanel.appendChild(el(`<div class="notice small"><strong>iPhone/iPad 안내</strong> · iOS에서는 자동 받아쓰기 지원이 제한되거나 브라우저 상태에 따라 중단될 수 있습니다. <strong>음성 녹음 + 필요 시 직접 입력</strong> 방식을 권장합니다.</div>`));
+  }
+  if (capability) {
+    const parts = [`질문 음성 ${support.tts ? "✓" : "제한"}`, `녹음 ${support.recording ? "✓" : "제한"}`, `받아쓰기 ${support.stt ? "✓" : "제한"}`];
+    capability.textContent = parts.join(" · ") + (support.isMobile ? " · 휴대폰에서는 녹음과 받아쓰기가 동시에 제한될 수 있습니다." : "");
+  }
+  if (!support.tts) { body.querySelector("#speak-q-btn").disabled = true; body.querySelector("#auto-tts").checked = false; body.querySelector("#auto-tts").disabled = true; }
+  if (!support.stt) { body.querySelector("#stt-enabled").checked = false; body.querySelector("#stt-enabled").disabled = true; body.querySelector("#stt-restart").disabled = true; }
+  if (support.isMobile) body.querySelector("#mobile-audio-mode-wrap").style.display = "flex";
+
+  body.querySelector("#speak-q-btn").onclick = () => speakInterviewQuestion(current.text, body.querySelector("#tts-rate").value);
+  body.querySelector("#clear-transcript").onclick = () => { body.querySelector("#answer-transcript").value = ""; body.querySelector("#speech-metrics").textContent = "말속도: 아직 기록 없음"; };
 
   const frameSelect = body.querySelector("#frame-select");
   function attemptCount() { return Number(AppState.practiceStats?.[current.id]?.attempts || 0); }
@@ -1444,6 +1505,23 @@ registerRoute("trainer", (params) => {
   body.querySelector("#crisis-btn").onclick = openCrisisModal;
 
   let trainer = null, trainingActive = false, playbackUrl = null;
+  let transcriber = null;
+  function ensureTranscriber() {
+    if (transcriber || !support.stt) return transcriber;
+    transcriber = new SpeechTranscriber({
+      onText: (finalText, interimText) => {
+        const ta = body.querySelector("#answer-transcript");
+        if (!ta.dataset.userEdited || ta.dataset.userEdited === "0") ta.value = [finalText, interimText].filter(Boolean).join(" ");
+      },
+      onStatus: (msg) => { body.querySelector("#stt-status").textContent = msg; },
+    });
+    return transcriber;
+  }
+  body.querySelector("#answer-transcript").addEventListener("input", (e) => { e.target.dataset.userEdited = "1"; });
+  body.querySelector("#stt-restart").onclick = () => {
+    const t = ensureTranscriber(); if (!t) return;
+    t.stop(); t.reset(); body.querySelector("#answer-transcript").dataset.userEdited = "0"; setTimeout(()=>t.start(),150);
+  };
   const setTrainingLocked = (locked) => {
     trainingActive = locked;
     ["#start30","#start45","#start60","#start90","#sprint-btn","#easy-concept-btn"].forEach((id)=>{ const b=body.querySelector(id); if(b) b.disabled=locked; });
@@ -1459,6 +1537,14 @@ registerRoute("trainer", (params) => {
     const phaseText = options.phaseLabel || `${mainSeconds}초 답변`;
     if (trainingActive || current.id === "empty") return;
     setTrainingLocked(true);
+    body.querySelector("#answer-transcript").dataset.userEdited = "0";
+    body.querySelector("#answer-transcript").value = "";
+    body.querySelector("#speech-metrics").textContent = "말속도: 분석 대기 중";
+    if (body.querySelector("#auto-tts").checked && support.tts) {
+      body.querySelector("#phase-label").textContent = "질문 듣기";
+      body.querySelector("#timer-display").textContent = "🔊";
+      await speakInterviewQuestion(current.text, body.querySelector("#tts-rate").value);
+    }
     trainer = new SpeakingTrainer({
       onTick: (remaining) => { body.querySelector("#timer-display").textContent = remaining + "s"; },
       onPhaseChange: (phase, seconds) => {
@@ -1472,19 +1558,31 @@ registerRoute("trainer", (params) => {
       },
       onFallback: (msg) => { body.querySelector("#rec-status").textContent=msg; },
     });
-    const recorded = await trainer.acquireStream();
+    const mobileMode = support.isMobile ? body.querySelector("#mobile-audio-mode").value : "both";
+    const wantsRecording = !support.isMobile || mobileMode === "record";
+    const recorded = wantsRecording ? await trainer.acquireStream() : false;
     if (trainer.cancelled) { trainer.releaseStream(); setTrainingLocked(false); return; }
-    body.querySelector("#rec-status").textContent = recorded ? "마이크 확보됨. 준비시간 뒤 녹음이 시작됩니다." : "스톱워치 모드로 진행합니다.";
+    body.querySelector("#rec-status").textContent = recorded ? "마이크 확보됨. 생각시간 뒤 녹음이 시작됩니다." : "스톱워치 모드로 진행합니다.";
     try {
       const prepSec = parseInt(body.querySelector("#prep-sec").value,10)||0;
       if (prepSec>0 && !(await trainer.runPhase(prepSec,"준비 시간"))) return;
       if (recorded) { const started=trainer.beginRecording(); body.querySelector("#rec-status").textContent=started?"녹음 중… (브라우저 메모리만 사용)":"녹음 시작에 실패하여 스톱워치로 진행합니다."; }
+      const useStt = body.querySelector("#stt-enabled").checked && support.stt && (!support.isMobile || mobileMode === "stt");
+      if (support.isMobile && body.querySelector("#stt-enabled").checked && mobileMode === "record") body.querySelector("#stt-status").textContent = "휴대폰 녹음 우선 모드: 받아쓰기는 이번 연습에서 생략";
+      const t = useStt ? ensureTranscriber() : null;
+      if (t) { t.reset(); body.querySelector("#answer-transcript").dataset.userEdited = "0"; t.start(); }
       const answerStartedAt = Date.now();
       if (!(await trainer.runPhase(mainSeconds, phaseText))) return;
       const actualSeconds = Math.max(1, Math.min(mainSeconds, Math.round((Date.now() - answerStartedAt) / 1000)));
-      trainer.stopRecording(); body.querySelector("#phase-label").textContent="완료";
+      trainer.stopRecording(); if (transcriber) transcriber.stop(); body.querySelector("#phase-label").textContent="완료";
       body.querySelector("#finish-answer").disabled = true;
-      markQuestionPractice(current.id, actualSeconds, practiceKind);
+      const transcript = body.querySelector("#answer-transcript").value.trim();
+      const wordCount = transcript ? transcript.split(/\s+/).filter(Boolean).length : 0;
+      const charCount = transcript ? transcript.replace(/\s+/g, "").length : 0;
+      const wordsPerMinute = wordCount ? Math.round(wordCount / actualSeconds * 60) : 0;
+      const charsPerMinute = charCount ? Math.round(charCount / actualSeconds * 60) : 0;
+      body.querySelector("#speech-metrics").textContent = charCount ? `받아쓰기 ${charCount}자 · 약 ${charsPerMinute}자/분 · ${wordsPerMinute}어절/분` : "받아쓰기 없음 · 직접 듣고 말속도를 확인하세요";
+      markQuestionPractice(current.id, actualSeconds, practiceKind, { lastTranscript: transcript.slice(0, 4000), lastCharCount: charCount, lastCharsPerMinute: charsPerMinute, lastWordCount: wordCount, lastWordsPerMinute: wordsPerMinute });
       body.querySelector("#attempt-count").textContent=`이 질문 말하기 시도: ${attemptCount()}회 · 결론 스퍼트: ${sprintCount()}회 · 최근 ${actualSeconds}초`;
     } finally { setTrainingLocked(false); }
   }
@@ -1527,9 +1625,11 @@ registerRoute("trainer", (params) => {
     const elapsed = trainer.completePhase();
     if (elapsed !== null) { body.querySelector("#finish-answer").disabled = true; body.querySelector("#rec-status").textContent = "답변을 종료했습니다. 실제 답변시간을 기록합니다."; }
   };
-  body.querySelector("#cancel-btn").onclick=()=>{ if(trainer) trainer.cancel(); body.querySelector("#phase-label").textContent="중지됨"; body.querySelector("#finish-answer").disabled=true; setTrainingLocked(false); };
+  body.querySelector("#cancel-btn").onclick=()=>{ if(trainer) trainer.cancel(); if(transcriber) transcriber.stop(); try{window.speechSynthesis?.cancel();}catch(e){} body.querySelector("#phase-label").textContent="중지됨"; body.querySelector("#finish-answer").disabled=true; setTrainingLocked(false); };
   setRouteCleanup(() => {
     if (trainer) trainer.cancel();
+    if (transcriber) transcriber.stop();
+    try { window.speechSynthesis?.cancel(); } catch(e) {}
     if (playbackUrl) { try { URL.revokeObjectURL(playbackUrl); } catch(e) {} playbackUrl = null; }
     document.querySelectorAll(".modal-backdrop").forEach((m)=>m.remove());
   });
@@ -1919,6 +2019,7 @@ registerRoute("data-io", () => {
     <label class="field checkbox"><input type="checkbox" id="opt-log" checked> 면접 후기</label>
     <label class="field checkbox"><input type="checkbox" id="opt-weak" checked> 설명이 필요한 기록</label>
     <label class="field checkbox"><input type="checkbox" id="opt-notes" checked> 기타 면접 준비 메모·자가평가·연습기록 (지원동기·빈출질문 메모·연습횟수 등)</label>
+    <label class="field checkbox"><input type="checkbox" id="opt-transcripts"> 받아쓰기 답변 텍스트까지 포함 (기본 해제 — 실제 말한 내용이 저장됩니다)</label>
     <label class="field checkbox"><input type="checkbox" id="opt-evidence"> 질문의 학생부 근거 문장까지 포함 (기본 해제 — 세특 등 학생부 실제 문장이 그대로 담깁니다)</label>
     <button class="btn-primary" id="export-btn">내 준비 데이터 저장 (JSON)</button>
     <hr class="divider">
@@ -1934,6 +2035,7 @@ registerRoute("data-io", () => {
       includeLogs: body.querySelector("#opt-log").checked,
       includeWeakness: body.querySelector("#opt-weak").checked,
       includePreparationNotes: body.querySelector("#opt-notes").checked,
+      includeTranscripts: body.querySelector("#opt-transcripts").checked,
       includeEvidence: body.querySelector("#opt-evidence").checked,
     });
   };

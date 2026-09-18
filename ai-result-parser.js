@@ -312,3 +312,61 @@ function buildFallbackSection(rawText) {
     cards: splitTextIntoCards(rawText),
   };
 }
+
+// ── v7.3 RAG-lite: AI evidence quote ↔ original record verification ──────
+function normalizeEvidenceText(value) {
+  return String(value || '').toLowerCase().replace(/[\s\u00a0]+/g, '').replace(/[“”‘’'"`.,·•:;()\[\]{}<>!?？…\-–—_/\\]/g, '');
+}
+function charNgrams(text, n = 3) {
+  const s = normalizeEvidenceText(text), set = new Set();
+  if (s.length < n) { if (s) set.add(s); return set; }
+  for (let i = 0; i <= s.length - n; i++) set.add(s.slice(i, i + n));
+  return set;
+}
+function diceSimilarity(a, b) {
+  const A = charNgrams(a), B = charNgrams(b); if (!A.size || !B.size) return 0;
+  let hit = 0; for (const x of A) if (B.has(x)) hit++;
+  return (2 * hit) / (A.size + B.size);
+}
+function bestEvidenceWindowSimilarity(quote, recordText) {
+  const q = normalizeEvidenceText(quote), r = normalizeEvidenceText(recordText);
+  if (!q || !r) return 0; if (r.includes(q)) return 1;
+  if (r.length <= q.length * 1.45) return diceSimilarity(q, r);
+  const sizes = [0.9, 1.0, 1.15, 1.3].map((x) => Math.max(8, Math.round(q.length * x)));
+  const step = Math.max(1, Math.floor(q.length / 5)); let best = 0;
+  for (const size of sizes) {
+    for (let i = 0; i < r.length; i += step) {
+      const win = r.slice(i, i + size); if (win.length < Math.min(8, q.length * 0.65)) break;
+      best = Math.max(best, diceSimilarity(q, win)); if (best >= 0.94) return best;
+    }
+  }
+  return best;
+}
+function evidenceSourceLabel(source, status) {
+  const isRecord = source === '학생부/붙여넣기';
+  if (status === 'verified') return isRecord ? '학생부 원문 확인' : '입력 자료에서 확인';
+  if (status === 'similar') return isRecord ? '유사 학생부 원문 확인 - 직접 대조 권장' : '유사 입력 자료 확인 - 직접 대조 권장';
+  return '원문에서 확인 안 됨 - 학생 확인 필요';
+}
+function verifyEvidenceQuote(quote) {
+  const q = String(quote || '').trim();
+  if (!q) return { status:'missing', score:0, label:'근거 인용 없음', recordId:null, source:null };
+  const nq = normalizeEvidenceText(q);
+  if (nq.length < 6) return { status:'short', score:0, label:'인용이 너무 짧아 확인 어려움', recordId:null, source:null };
+  const records = (typeof AppState !== 'undefined' && Array.isArray(AppState.records))
+    ? AppState.records.filter((r) => r && r.text && (r.source === '학생부/붙여넣기' || r.source === '직접 입력')) : [];
+  for (const r of records) {
+    const nr = normalizeEvidenceText(r.text);
+    if (nr && (nr.includes(nq) || (nq.length > nr.length && nq.includes(nr) && nr.length >= 12))) {
+      return { status:'verified', score:1, label:evidenceSourceLabel(r.source,'verified'), recordId:r.id, section:r.section||'', source:r.source };
+    }
+  }
+  let best = { score:0, recordId:null, section:'', source:null };
+  for (const r of records) {
+    const score = bestEvidenceWindowSimilarity(q, r.text);
+    if (score > best.score) best = { score, recordId:r.id, section:r.section||'', source:r.source };
+  }
+  if (best.score >= 0.66) return { status:'similar', score:best.score, label:evidenceSourceLabel(best.source,'similar'), recordId:best.recordId, section:best.section, source:best.source };
+  return { status:'unverified', score:best.score, label:evidenceSourceLabel(best.source,'unverified'), recordId:best.recordId, section:best.section, source:best.source };
+}
+

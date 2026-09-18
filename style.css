@@ -449,3 +449,24 @@ body.printing-active #print-mount { display: block; }
 .staged-followups{list-style:none;padding-left:0}.staged-followups li{display:flex;gap:8px;align-items:flex-start;margin:8px 0}.stage-badge{flex:0 0 auto;font-size:.72rem;font-weight:800;padding:3px 7px;border-radius:999px;background:var(--soft,#eef3ff);color:var(--primary,#315efb)}
 .optional-expand-tip{padding:11px 12px;border-radius:12px;border:1px dashed var(--primary,#315efb);background:var(--soft,#f7f9fc);font-size:.9rem}.optional-expand-tip strong{display:block;margin-bottom:4px}.optional-expand-tip span{color:var(--muted,#65758b);line-height:1.45}
 @media (max-width:640px){.reverse-map-grid{grid-template-columns:1fr}.reverse-map-head{align-items:flex-start;flex-direction:column}}
+
+/* v7 RAG-lite evidence verification */
+.evidence-verify-badge{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:11px;font-weight:800;line-height:1.2;margin-left:8px}
+.evidence-verified{background:#e7f7ee;color:#146b3a;border:1px solid #b8e3ca}
+.evidence-similar{background:#fff7df;color:#7a5a00;border:1px solid #ecd78e}
+.evidence-unverified,.evidence-short{background:#fff0ed;color:#9b2f22;border:1px solid #efc1b9}
+.evidence-missing{background:#f2f4f7;color:#667085;border:1px solid #dfe3e8}
+
+
+/* v7.1 실전훈련: 질문 TTS · STT 받아쓰기 · 브라우저 안내 */
+.browser-support-banner{margin:0 auto;padding:10px 18px;max-width:1100px;display:flex;gap:10px;align-items:flex-start;background:#fff8e6;border:1px solid #ecd58b;border-radius:0 0 12px 12px;color:#725a18;font-size:.82rem;line-height:1.45}
+.browser-support-banner strong{white-space:nowrap}.browser-support-banner span{color:inherit}
+[data-theme="dark"] .browser-support-banner{background:#2b2515;border-color:#63552d;color:#dfc976}
+.trainer-voice-panel,.transcript-card{border:1px solid var(--line);background:color-mix(in srgb,var(--primary) 3%,var(--surface))}
+.trainer-voice-options{align-items:end;flex-wrap:wrap}.compact-field{min-width:145px;flex:1}.compact-field.checkbox{min-width:190px;align-self:center}
+.browser-capability{padding-top:4px}.transcript-card textarea{width:100%;resize:vertical;min-height:130px;margin-top:10px}
+.transcript-tools{gap:10px;margin-top:8px}.transcript-tools .row-gap{flex-wrap:wrap}
+@media(max-width:640px){.browser-support-banner{margin:0 8px;flex-direction:column}.trainer-voice-panel .row-between,.transcript-tools{align-items:flex-start;flex-direction:column}.trainer-voice-options{flex-direction:column;align-items:stretch}.compact-field{width:100%;min-width:0}.transcript-tools .row-gap{width:100%}.transcript-tools button{flex:1}}
+
+/* v7.3 RAG feedback */
+.rag-vote-row{margin-top:8px;align-items:center}.rag-vote-row button[aria-pressed="true"]{font-weight:800;outline:2px solid currentColor;outline-offset:1px}.rag-result-card{transition:opacity .2s ease}.rag-vote-state{min-height:1em}

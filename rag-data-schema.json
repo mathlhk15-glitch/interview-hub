@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Interview Hub RAG-lite Question",
+  "type": "object",
+  "required": ["id", "sourceId", "sourceTitle", "sourceType", "page", "question", "categories", "keywords"],
+  "properties": {
+    "id": {"type": "string"},
+    "sourceId": {"type": "string"},
+    "sourceTitle": {"type": "string"},
+    "sourceType": {"enum": ["doc_based", "mixed", "mmi_medical", "prompt_math", "prompt_humanities"]},
+    "page": {"type": "integer", "minimum": 1},
+    "question": {"type": "string"},
+    "categories": {"type": "array", "items": {"enum": ["general", "career", "concept", "motive", "process", "role", "limit", "extend", "community", "mmi", "prompt"]}},
+    "keywords": {"type": "array", "items": {"type": "string"}},
+    "context": {"type": "string"}
+  }
+}

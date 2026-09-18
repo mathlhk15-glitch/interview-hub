@@ -16,5 +16,5 @@ window.APP_CONFIG = {
   APP_NAME: "2027 대입 면접 셀프 트레이너",
 
   // 배포 버전
-  APP_VERSION: "6.4-question-print",
+  APP_VERSION: "7.3-rag-lite",
 };

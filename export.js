@@ -1,13 +1,13 @@
 /**
  * export.js
  * 준비 데이터 백업/복원과 면접후기 내보내기.
- * - schemaVersion 5
+ * - schemaVersion 8
  * - 학생부 PDF 전체 원문, 녹음, AI 원문은 어떤 경우에도 내보내지 않습니다.
  * - 직접 입력 기록은 기본 백업합니다.
  * - 학생부에서 파생된 기록과 질문 근거문장은 사용자가 별도 선택한 경우에만 포함합니다.
  */
 
-const BACKUP_SCHEMA_VERSION = 5;
+const BACKUP_SCHEMA_VERSION = 8;
 
 function downloadFile(filename, content, mime) {
   const blob = new Blob([content], { type: mime || "application/octet-stream" });
@@ -30,6 +30,7 @@ function buildExportPayload(state, options) {
   const includeLogs = options.includeLogs !== false;
   const includeWeakness = options.includeWeakness !== false;
   const includePreparationNotes = options.includePreparationNotes !== false;
+  const includeTranscripts = options.includeTranscripts === true;
 
   const exportRecords = (state.records || []).filter((r) => r.source === "직접 입력" || includeRecordDerived);
   const exportedRecordIds = new Set(exportRecords.map((r) => r.id));
@@ -41,6 +42,7 @@ function buildExportPayload(state, options) {
     _includesRecordDerived: includeRecordDerived,
     _includesRecordEvidence: includeEvidence,
     _includesPreparationNotes: includePreparationNotes,
+    _includesTranscripts: includeTranscripts,
   };
 
 
@@ -49,6 +51,7 @@ function buildExportPayload(state, options) {
     payload.mockEvaluation = cloneJson(state.mockEvaluation || { checks: {}, good: "", fix: "" });
     payload.aiVerificationNotes = cloneJson(state.aiVerificationNotes || []);
     payload.practiceStats = cloneJson(state.practiceStats || {});
+    if (!includeTranscripts) Object.values(payload.practiceStats).forEach((v) => { if (v && typeof v === "object") delete v.lastTranscript; });
     payload.mmiPracticeCount = Number(state.mmiPracticeCount || 0);
     payload.introKeywords = state.introKeywords || "";
     payload.lastWord = state.lastWord || "";
@@ -60,6 +63,7 @@ function buildExportPayload(state, options) {
       favoriteCourseWhy: state.favoriteCourseWhy || "",
       afterAdmission: state.afterAdmission || "",
       motiveOneLine: state.motiveOneLine || "",
+      ragFeedback: cloneJson(state.ragFeedback || {}),
     };
   }
 
@@ -88,7 +92,8 @@ function buildExportPayload(state, options) {
   payload._note = "이 파일에는 면접 준비 데이터가 담겨 있습니다. 공용 기기·공용 클라우드 저장에 주의하세요. " +
     (includeRecordDerived ? "학생부에서 파생된 정리 기록이 포함되어 있습니다. " : "학생부에서 파생된 정리 기록은 제외되었습니다. ") +
     (includeEvidence ? "질문의 학생부 근거 문장이 포함되어 있습니다. " : "질문의 학생부 근거 문장은 제외되었습니다. ") +
-    (includePreparationNotes ? "기타 면접 준비 메모·자가평가·연습기록이 포함되어 있습니다." : "기타 면접 준비 메모·자가평가·연습기록은 제외되었습니다.");
+    (includePreparationNotes ? "기타 면접 준비 메모·자가평가·연습기록이 포함되어 있습니다. " : "기타 면접 준비 메모·자가평가·연습기록은 제외되었습니다. ") +
+    (includeTranscripts ? "받아쓰기 답변 텍스트가 포함되어 있습니다." : "받아쓰기 답변 텍스트는 제외되었습니다.");
   return payload;
 }
 
@@ -103,7 +108,7 @@ function resetPreparationStateForImport() {
   AppState.interviewLogs = []; AppState.aiResultRaw = ""; AppState.weaknessEntries = [];
   AppState.commonAnswers = {}; AppState.mockEvaluation = { checks: {}, good: "", fix: "" };
   AppState.aiResultSections = null; AppState.aiDeepResult = null; AppState.aiVerificationNotes = [];
-  AppState.analysisResult = null; AppState.analysisUpdatedAt = null; AppState.practiceStats = {}; AppState.mmiPracticeCount = 0;
+  AppState.analysisResult = null; AppState.analysisUpdatedAt = null; AppState.practiceStats = {}; AppState.mmiPracticeCount = 0; AppState.ragFeedback = {};
   AppState.introKeywords = ""; AppState.lastWord = ""; AppState.motiveMoment = ""; AppState.motiveActions = [];
   AppState.majorCourses = ""; AppState.majorSourceLog = ""; AppState.favoriteCourseWhy = ""; AppState.afterAdmission = ""; AppState.motiveOneLine = "";
 }
@@ -134,6 +139,8 @@ function importStateFromJson(jsonText, options) {
     if (typeof data.lastWord === "string") AppState.lastWord = data.lastWord;
 
     const m = data.motivation || data;
+    if (typeof data.ragFeedback === "object" && data.ragFeedback) AppState.ragFeedback = data.ragFeedback;
+    else if (typeof m.ragFeedback === "object" && m.ragFeedback) AppState.ragFeedback = m.ragFeedback;
     ["motiveMoment", "majorCourses", "majorSourceLog", "favoriteCourseWhy", "afterAdmission", "motiveOneLine"].forEach((k) => {
       if (typeof m[k] === "string") AppState[k] = m[k];
     });

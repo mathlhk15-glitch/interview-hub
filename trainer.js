@@ -11,6 +11,89 @@ function pickSupportedMimeType() {
   return "";
 }
 
+
+
+// ── v7.3 질문 TTS · STT · 브라우저 지원 감지 ──────────────────────────
+function getInterviewBrowserSupport() {
+  const ua = navigator.userAgent || "";
+  const isIPadDesktopUA = navigator.platform === "MacIntel" && Number(navigator.maxTouchPoints || 0) > 1;
+  const isIOS = /iPhone|iPad|iPod/i.test(ua) || isIPadDesktopUA;
+  const isAndroid = /Android/i.test(ua);
+  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+  const isKakao = /KAKAOTALK/i.test(ua);
+  const isInstagram = /Instagram/i.test(ua);
+  const isInApp = isKakao || isInstagram || /FBAN|FBAV|NAVER\(inapp/i.test(ua);
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  return {
+    isIOS, isAndroid, isMobile: isMobile || isIPadDesktopUA, isInApp, secureContext: window.isSecureContext !== false,
+    tts: "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined",
+    stt: !!SpeechRecognitionCtor,
+    recording: typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia,
+    SpeechRecognitionCtor,
+  };
+}
+
+function speakInterviewQuestion(text, rate) {
+  const support = getInterviewBrowserSupport();
+  if (!support.tts) return Promise.resolve(false);
+  try { window.speechSynthesis.cancel(); } catch (e) { /* ignore */ }
+  return new Promise((resolve) => {
+    const u = new SpeechSynthesisUtterance(String(text || ""));
+    u.lang = "ko-KR";
+    u.rate = Math.max(0.6, Math.min(1.6, Number(rate) || 1));
+    let settled = false;
+    const finish = (value) => { if (settled) return; settled = true; clearTimeout(fallback); resolve(value); };
+    const fallback = setTimeout(() => { try { window.speechSynthesis.cancel(); } catch (e) {} finish(false); }, 20000);
+    u.onend = () => finish(true);
+    u.onerror = () => finish(false);
+    try { window.speechSynthesis.speak(u); } catch (e) { finish(false); }
+  });
+}
+
+class SpeechTranscriber {
+  constructor({ onText, onStatus }) {
+    const support = getInterviewBrowserSupport();
+    this.Ctor = support.SpeechRecognitionCtor; this.onText = onText || (()=>{}); this.onStatus = onStatus || (()=>{});
+    this.recognition = null; this.finalText = ""; this.interimText = ""; this.active = false;
+    this.shouldRun = false; this.restartCount = 0; this.maxRestarts = 2;
+  }
+  start() {
+    if (!this.Ctor || this.active) return false;
+    this.shouldRun = true;
+    try {
+      const r = new this.Ctor(); this.recognition = r;
+      r.lang = "ko-KR"; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
+      r.onresult = (event) => {
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const text = event.results[i][0]?.transcript || "";
+          if (event.results[i].isFinal) this.finalText += (this.finalText ? " " : "") + text.trim(); else interim += text;
+        }
+        this.interimText = interim.trim(); this.onText(this.finalText, this.interimText);
+      };
+      r.onerror = (e) => {
+        const code = e.error || "오류";
+        if (["not-allowed","service-not-allowed","audio-capture"].includes(code)) this.shouldRun = false;
+        this.onStatus(`받아쓰기 제한: ${code}`);
+      };
+      r.onend = () => {
+        this.active = false;
+        if (this.shouldRun && this.restartCount < this.maxRestarts) {
+          this.restartCount += 1; this.onStatus(`받아쓰기 재연결 중… (${this.restartCount}/${this.maxRestarts})`);
+          setTimeout(() => this.start(), 250);
+        } else this.onStatus("받아쓰기 종료");
+      };
+      r.start(); this.active = true; this.onStatus("받아쓰기 중…"); return true;
+    } catch (e) { this.shouldRun = false; this.onStatus("이 브라우저에서는 받아쓰기를 시작할 수 없습니다."); return false; }
+  }
+  stop() {
+    this.shouldRun = false; this.restartCount = 0;
+    if (this.recognition && this.active) { try { this.recognition.stop(); } catch (e) {} }
+    this.active = false;
+  }
+  reset() { this.finalText = ""; this.interimText = ""; this.restartCount = 0; this.onText("", ""); }
+}
+
 class SpeakingTrainer {
   constructor({ onTick, onPhaseChange, onRecordingBlob, onFallback }) {
     this.onTick = onTick || (() => {});

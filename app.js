@@ -33,6 +33,7 @@ const AppState = {
   analysisUpdatedAt: null, // 마지막 자동분석 시각
   practiceStats: {},      // { [questionId]: { attempts, lastSeconds, lastAt } } — 세션 내 진행 현황
   mmiPracticeCount: 0,    // 세션 내 MMI 연습 횟수
+  ragFeedback: {},        // { [ragQuestionId]: "up" | "down" } - 세션 내 검색 품질 피드백
 };
 
 function saveLocalSetting(key, value) {
@@ -137,7 +138,7 @@ function hasVolatilePreparationData() {
     AppState.aiResultSections || AppState.aiDeepResult || AppState.analysisResult ||
     (AppState.aiVerificationNotes || []).length ||
     Object.keys(AppState.commonAnswers || {}).some((k) => String(AppState.commonAnswers[k] || "").trim()) ||
-    Object.keys(AppState.practiceStats || {}).length || Number(AppState.mmiPracticeCount || 0) > 0 ||
+    Object.keys(AppState.practiceStats || {}).length || Number(AppState.mmiPracticeCount || 0) > 0 || Object.keys(AppState.ragFeedback || {}).length > 0 ||
     Object.values(mock.checks || {}).some(Boolean) || String(mock.good || "").trim() || String(mock.fix || "").trim() ||
     String(AppState.introKeywords || "").trim() || String(AppState.lastWord || "").trim() ||
     String(AppState.motiveMoment || "").trim() || (AppState.motiveActions || []).length ||
@@ -173,16 +174,18 @@ function getReadinessSummary() {
   };
 }
 
-function markQuestionPractice(questionId, seconds, kind) {
+function markQuestionPractice(questionId, seconds, kind, details) {
   if (!questionId) return;
   const prev = AppState.practiceStats[questionId] || { attempts: 0, sprintAttempts: 0, easyAttempts: 0 };
   const mode = kind || "full";
+  const extra = details && typeof details === "object" ? details : {};
   if (mode === "sprint") {
     AppState.practiceStats[questionId] = {
       ...prev,
       sprintAttempts: Number(prev.sprintAttempts || 0) + 1,
       lastSprintSeconds: Number(seconds || 0),
       lastSprintAt: new Date().toISOString(),
+      ...extra,
     };
     return;
   }
@@ -192,6 +195,7 @@ function markQuestionPractice(questionId, seconds, kind) {
     easyAttempts: Number(prev.easyAttempts || 0) + (mode === "easy" ? 1 : 0),
     lastSeconds: Number(seconds || 0),
     lastAt: new Date().toISOString(),
+    ...extra,
   };
 }
 
@@ -310,8 +314,22 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("hashchange", renderRoute);
 document.addEventListener("DOMContentLoaded", () => {
   applyTheme(loadLocalSetting("theme", "light"));
+  renderGlobalBrowserSupportBanner();
   renderRoute();
 });
+
+function renderGlobalBrowserSupportBanner() {
+  const box = document.getElementById("browser-support-banner");
+  if (!box || typeof getInterviewBrowserSupport !== "function") return;
+  const s = getInterviewBrowserSupport();
+  let html = "";
+  if (s.isInApp) {
+    html = `<strong>브라우저에서 다시 열어주세요.</strong><span>카카오톡·인스타그램 등 앱 안 브라우저에서는 마이크·받아쓰기가 제한될 수 있습니다. Chrome/Edge 또는 Safari에서 여는 것을 권장합니다.</span>`;
+  } else if (!s.secureContext || !s.recording || (!s.tts && !s.stt)) {
+    html = `<strong>일부 실전훈련 기능이 제한됩니다.</strong><span>질문 음성·녹음·받아쓰기는 브라우저·보안 연결 상태에 따라 지원 범위가 다릅니다. Chrome/Edge의 HTTPS 페이지 사용을 권장합니다.</span>`;
+  }
+  if (html) { box.innerHTML = html; box.style.display = "flex"; }
+}
 
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
